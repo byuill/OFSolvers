@@ -1,6 +1,9 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QDoubleSpinBox, QSpinBox, QPushButton, QTabWidget, QComboBox, QGroupBox, QFormLayout, QGridLayout)
 
+from mesh_tab import MeshTab
+from boundary_tab import BoundaryTab
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -22,11 +25,11 @@ class MainWindow(QMainWindow):
         self.setup_conceptual_tab()
         
         # Tab 2: Mesh Generation (Placeholder for later)
-        self.tab_mesh = QWidget()
+        self.tab_mesh = MeshTab()
         self.tabs.addTab(self.tab_mesh, "2. Mesh Generation")
 
         # Tab 3: Boundary Conditions (Specific details based on Tab 1)
-        self.tab_boundaries = QWidget()
+        self.tab_boundaries = BoundaryTab()
         self.tabs.addTab(self.tab_boundaries, "3. Boundary Conditions")
 
         # Global Run/Save Button

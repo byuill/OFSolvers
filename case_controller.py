@@ -36,6 +36,12 @@ class CaseController:
         self.view.end_time_spinbox.setValue(self.model.end_time)
         self.view.delta_t_spinbox.setValue(self.model.delta_t)
 
+        # Link conceptual model with mesh generation tab
+        self.view.tab_mesh.update_from_conceptual_model(
+            self.model.dim_x, self.model.dim_y, self.model.dim_z,
+            self.model.cells_x, self.model.cells_y, self.model.cells_z
+        )
+
     def update_advice(self):
         solver = self.view.solver_combo.currentText()
         advice = []
