@@ -7,7 +7,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                              QComboBox, QCheckBox, QFrame, QHeaderView, QScrollArea, QGridLayout, QMessageBox)
 from PyQt6.QtCore import Qt
 
+from PyQt6.QtCore import pyqtSignal
+
 class MeshTab(QWidget):
+    mesh_updated = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
@@ -133,6 +136,7 @@ class MeshTab(QWidget):
             self.plotter.show_axes()
             self.plotter.show_grid()
             self.plotter.reset_camera()
+            self.mesh_updated.emit()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not visualize blockMesh: {str(e)}")
 
@@ -205,6 +209,7 @@ class MeshTab(QWidget):
 
             QMessageBox.information(self, "Success", "Mesh cleaned and fixed!")
             self.run_diagnostics() # Update stats
+            self.mesh_updated.emit()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to fix mesh: {str(e)}")
 
@@ -318,6 +323,7 @@ class MeshTab(QWidget):
                 self.plotter.show_axes()
                 self.plotter.show_grid()
                 self.plotter.reset_camera()
+                self.mesh_updated.emit()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load geometry: {str(e)}")
 
