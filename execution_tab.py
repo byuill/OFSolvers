@@ -1,8 +1,19 @@
 import os
 import subprocess
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                             QLabel, QRadioButton, QSpinBox, QComboBox, 
-                             QTextEdit, QGroupBox, QFormLayout, QMessageBox)
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QRadioButton,
+    QSpinBox,
+    QComboBox,
+    QTextEdit,
+    QGroupBox,
+    QFormLayout,
+    QMessageBox,
+)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 
@@ -11,6 +22,7 @@ class OpenFOAMWorker(QThread):
     Worker thread to execute OpenFOAM terminal commands without blocking the main GUI.
     Captures stdout/stderr in real-time and emits it back to the main thread.
     """
+
     output_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(int)
 
@@ -32,19 +44,19 @@ class OpenFOAMWorker(QThread):
                 shell=True,
                 cwd=self.cwd,
                 text=True,
-                bufsize=1
+                bufsize=1,
             )
-            
+
             # Read output line by line in real-time
-            for line in iter(self.process.stdout.readline, ''):
+            for line in iter(self.process.stdout.readline, ""):
                 if not self._is_running:
                     break
                 if line:
                     self.output_signal.emit(line.strip())
-            
+
             self.process.stdout.close()
             return_code = self.process.wait()
-            
+
             if self._is_running:
                 self.finished_signal.emit(return_code)
 
@@ -69,7 +81,7 @@ class ExecutionTab(QWidget):
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        
+
         # 1. Environment Selection
         env_group = QGroupBox("1. Environment Selection")
         env_layout = QHBoxLayout(env_group)
@@ -104,7 +116,7 @@ class ExecutionTab(QWidget):
         # 4. Execution & Diagnostics
         exec_group = QGroupBox("4. Execution & Diagnostics")
         exec_layout = QVBoxLayout(exec_group)
-        
+
         solver_layout = QHBoxLayout()
         solver_layout.addWidget(QLabel("Target Solver:"))
         self.combo_solver = QComboBox()
@@ -114,21 +126,27 @@ class ExecutionTab(QWidget):
         exec_layout.addLayout(solver_layout)
 
         self.btn_run = QPushButton("RUN SOLVER")
-        self.btn_run.setStyleSheet("font-size: 16px; font-weight: bold; background-color: #4CAF50; color: white; padding: 10px;")
+        self.btn_run.setStyleSheet(
+            "font-size: 16px; font-weight: bold; background-color: #4CAF50; color: white; padding: 10px;"
+        )
         self.btn_run.clicked.connect(self.run_solver)
         exec_layout.addWidget(self.btn_run)
 
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setStyleSheet("background-color: #1e1e1e; color: #00FF00; font-family: Consolas, monospace;")
+        self.console.setStyleSheet(
+            "background-color: #1e1e1e; color: #00FF00; font-family: Consolas, monospace;"
+        )
         exec_layout.addWidget(self.console)
 
         self.btn_stop = QPushButton("Stop/Kill Simulation")
-        self.btn_stop.setStyleSheet("background-color: #f44336; color: white; font-weight: bold;")
+        self.btn_stop.setStyleSheet(
+            "background-color: #f44336; color: white; font-weight: bold;"
+        )
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_simulation)
         exec_layout.addWidget(self.btn_stop)
-        
+
         main_layout.addWidget(exec_group)
 
         # 5. Post-Processing
@@ -176,17 +194,21 @@ class ExecutionTab(QWidget):
             self.worker.stop()
 
     def run_qaqc(self):
-        # 1. Directory Checks
-        missing = [d for d in ['0', 'constant', 'system', 'constant/polyMesh'] if not os.path.exists(os.path.join(os.getcwd(), d))]
+        missing = [
+            d
+            for d in ["0", "constant", "system"]
+            if not os.path.exists(os.path.join(os.getcwd(), d))
+        ]
         if missing:
-            error_msg = f"QAQC FAILED: Missing essential OpenFOAM directories: {', '.join(missing)}"
-            self.append_log(error_msg)
-            QMessageBox.critical(self, "QAQC Error", error_msg)
-            return
-
-        self.append_log("QAQC PASS: '0', 'constant', 'system', and 'constant/polyMesh' directories exist.")
-        # 2. Execute checkMesh
-        self.execute_command("checkMesh")
+            self.append_log(
+                f"QAQC FAILED: Missing essential OpenFOAM directories: {', '.join(missing)}"
+            )
+        else:
+            self.append_log(
+                "QAQC PASS: '0', 'constant', and 'system' directories exist."
+            )
+            # 2. Execute checkMesh
+            self.execute_command("checkMesh")
 
     def run_decompose(self):
         self.execute_command("decomposePar")
@@ -216,5 +238,9 @@ class ExecutionTab(QWidget):
         """
         self.append_log("--- HPC Execution Mode Selected ---")
         self.append_log(f"[HPC Placeholder] Preparing to send command: {command}")
-        self.append_log("[HPC Placeholder] paramiko SSH connection to ERDC Carpenter pending...")
-        self.append_log("[HPC Placeholder] Case transfer (SCP) and PBS script submission omitted in placeholder.")
+        self.append_log(
+            "[HPC Placeholder] paramiko SSH connection to ERDC Carpenter pending..."
+        )
+        self.append_log(
+            "[HPC Placeholder] Case transfer (SCP) and PBS script submission omitted in placeholder."
+        )

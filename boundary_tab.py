@@ -1,13 +1,28 @@
 import os
 import re
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-                             QGroupBox, QLabel, QDoubleSpinBox, QCheckBox,
-                             QPushButton, QListWidget, QComboBox, QStackedWidget,
-                             QFormLayout, QMessageBox, QLineEdit, QFileDialog)
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QSplitter,
+    QGroupBox,
+    QLabel,
+    QDoubleSpinBox,
+    QCheckBox,
+    QPushButton,
+    QListWidget,
+    QComboBox,
+    QStackedWidget,
+    QFormLayout,
+    QMessageBox,
+    QLineEdit,
+    QFileDialog,
+)
 from PyQt6.QtCore import Qt
 
 from openfoam_dict_parser import OpenFoamDictParser
+
 
 class BoundaryTab(QWidget):
     def __init__(self, parent=None):
@@ -44,7 +59,9 @@ class BoundaryTab(QWidget):
 
         case_layout = QHBoxLayout()
         self.case_dir_edit = QLineEdit(self.case_dir)
-        self.case_dir_edit.setPlaceholderText("OpenFOAM case directory (contains 0/, constant/, system/)")
+        self.case_dir_edit.setPlaceholderText(
+            "OpenFOAM case directory (contains 0/, constant/, system/)"
+        )
         self.case_dir_edit.editingFinished.connect(self._on_case_dir_edited)
         btn_case_browse = QPushButton("Browse Case")
         btn_case_browse.clicked.connect(self.browse_case_directory)
@@ -54,7 +71,9 @@ class BoundaryTab(QWidget):
 
         self.patch_list = QListWidget()
         # Add some placeholder patches for demonstration
-        self.patch_list.addItems(["inlet", "outlet", "bottom", "atmosphere", "side1", "side2"])
+        self.patch_list.addItems(
+            ["inlet", "outlet", "bottom", "atmosphere", "side1", "side2"]
+        )
         self.patch_list.currentItemChanged.connect(self.on_patch_selected)
         left_layout.addWidget(self.patch_list)
 
@@ -62,7 +81,9 @@ class BoundaryTab(QWidget):
         self.btn_import_patches.clicked.connect(self.import_patches)
         left_layout.addWidget(self.btn_import_patches)
 
-        self.btn_import_boundary = QPushButton("Import Patch Names from constant/polyMesh/boundary")
+        self.btn_import_boundary = QPushButton(
+            "Import Patch Names from constant/polyMesh/boundary"
+        )
         self.btn_import_boundary.clicked.connect(self.import_patches_from_boundary_file)
         left_layout.addWidget(self.btn_import_boundary)
 
@@ -78,7 +99,9 @@ class BoundaryTab(QWidget):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("<b>Conceptual Boundary Type:</b>"))
         self.bc_type_combo = QComboBox()
-        self.bc_type_combo.addItems(["Inlet", "Outlet", "Atmosphere", "Bed/Wall", "Symmetry", "Mapped"])
+        self.bc_type_combo.addItems(
+            ["Inlet", "Outlet", "Atmosphere", "Bed/Wall", "Symmetry", "Mapped"]
+        )
         self.bc_type_combo.currentTextChanged.connect(self.on_bc_type_changed)
         type_layout.addWidget(self.bc_type_combo)
         self.right_layout.addLayout(type_layout)
@@ -104,12 +127,12 @@ class BoundaryTab(QWidget):
         self.page_mapped = self.build_mapped_page()
 
         # Add pages to stacked widget (Must match the order in the combobox)
-        self.stacked_widget.addWidget(self.page_inlet)       # Index 0
-        self.stacked_widget.addWidget(self.page_outlet)      # Index 1
+        self.stacked_widget.addWidget(self.page_inlet)  # Index 0
+        self.stacked_widget.addWidget(self.page_outlet)  # Index 1
         self.stacked_widget.addWidget(self.page_atmosphere)  # Index 2
-        self.stacked_widget.addWidget(self.page_wall)        # Index 3
-        self.stacked_widget.addWidget(self.page_symmetry)    # Index 4
-        self.stacked_widget.addWidget(self.page_mapped)      # Index 5
+        self.stacked_widget.addWidget(self.page_wall)  # Index 3
+        self.stacked_widget.addWidget(self.page_symmetry)  # Index 4
+        self.stacked_widget.addWidget(self.page_mapped)  # Index 5
 
         self.right_layout.addWidget(self.stacked_widget)
         self.right_layout.addStretch()  # Push everything up
@@ -138,7 +161,9 @@ class BoundaryTab(QWidget):
         self.outlet_free_outfall.stateChanged.connect(self.save_current_patch_settings)
         self.outlet_dwl.valueChanged.connect(self.save_current_patch_settings)
         self.atm_pressure.valueChanged.connect(self.save_current_patch_settings)
-        self.wall_function_combo.currentTextChanged.connect(self.save_current_patch_settings)
+        self.wall_function_combo.currentTextChanged.connect(
+            self.save_current_patch_settings
+        )
         self.wall_ks.valueChanged.connect(self.save_current_patch_settings)
         self.mapped_avg_velocity.valueChanged.connect(self.save_current_patch_settings)
         self.mapped_target_patch.textChanged.connect(self.save_current_patch_settings)
@@ -165,7 +190,9 @@ class BoundaryTab(QWidget):
             self.case_dir = path
 
     def browse_case_directory(self):
-        selected = QFileDialog.getExistingDirectory(self, "Select OpenFOAM Case Directory", self.case_dir)
+        selected = QFileDialog.getExistingDirectory(
+            self, "Select OpenFOAM Case Directory", self.case_dir
+        )
         if selected:
             self.case_dir = selected
             self.case_dir_edit.setText(selected)
@@ -187,11 +214,15 @@ class BoundaryTab(QWidget):
         try:
             patch_entries = self._parse_boundary_file(boundary_path)
         except Exception as e:
-            QMessageBox.critical(self, "Boundary Parse Error", f"Failed parsing boundary file:\n{e}")
+            QMessageBox.critical(
+                self, "Boundary Parse Error", f"Failed parsing boundary file:\n{e}"
+            )
             return
 
         if not patch_entries:
-            QMessageBox.warning(self, "No Patches", "No patch entries were found in boundary metadata.")
+            QMessageBox.warning(
+                self, "No Patches", "No patch entries were found in boundary metadata."
+            )
             return
 
         patch_names = [entry["name"] for entry in patch_entries]
@@ -199,7 +230,11 @@ class BoundaryTab(QWidget):
         self.patch_list.addItems(patch_names)
         self._seed_patch_defaults_from_boundary_types(patch_entries)
         self.patch_list.setCurrentRow(0)
-        QMessageBox.information(self, "Imported", f"Imported {len(patch_entries)} patches from boundary metadata.")
+        QMessageBox.information(
+            self,
+            "Imported",
+            f"Imported {len(patch_entries)} patches from boundary metadata.",
+        )
 
     @staticmethod
     def _strip_foam_comments(text):
@@ -267,7 +302,9 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Inlet Configuration")
         layout = QFormLayout(page)
 
-        info_label = QLabel("<i>Maps to: U (variableHeightFlowRateInletVelocity), alpha.water (variableHeightFlowRate)</i>")
+        info_label = QLabel(
+            "<i>Maps to: U (variableHeightFlowRateInletVelocity), alpha.water (variableHeightFlowRate)</i>"
+        )
         info_label.setWordWrap(True)
         layout.addRow(info_label)
 
@@ -310,7 +347,9 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Atmosphere Configuration")
         layout = QFormLayout(page)
 
-        info_label = QLabel("<i>Maps to: U (pressureInletOutletVelocity), p_rgh (totalPressure)</i>")
+        info_label = QLabel(
+            "<i>Maps to: U (pressureInletOutletVelocity), p_rgh (totalPressure)</i>"
+        )
         info_label.setWordWrap(True)
         layout.addRow(info_label)
 
@@ -331,7 +370,9 @@ class BoundaryTab(QWidget):
         layout.addRow(info_label)
 
         self.wall_function_combo = QComboBox()
-        self.wall_function_combo.addItems(["kqRWallFunction", "nutkWallFunction", "nutkRoughWallFunction"])
+        self.wall_function_combo.addItems(
+            ["kqRWallFunction", "nutkWallFunction", "nutkRoughWallFunction"]
+        )
         layout.addRow("Turbulence Wall Function:", self.wall_function_combo)
 
         self.wall_ks = QDoubleSpinBox()
@@ -347,7 +388,9 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Symmetry Configuration")
         layout = QVBoxLayout(page)
 
-        info_label = QLabel("<i>Maps to: symmetry or symmetryPlane</i><br><br>No additional inputs required for symmetry boundaries.")
+        info_label = QLabel(
+            "<i>Maps to: symmetry or symmetryPlane</i><br><br>No additional inputs required for symmetry boundaries."
+        )
         info_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(info_label)
         layout.addStretch()
@@ -436,10 +479,14 @@ class BoundaryTab(QWidget):
             self.bc_type_combo.setCurrentText(settings.get("type", "Bed/Wall"))
             self.inlet_flow_rate.setValue(settings.get("inlet_flow_rate", 0.0))
             self.inlet_mwl.setValue(settings.get("inlet_mwl", 0.0))
-            self.outlet_free_outfall.setChecked(settings.get("outlet_free_outfall", False))
+            self.outlet_free_outfall.setChecked(
+                settings.get("outlet_free_outfall", False)
+            )
             self.outlet_dwl.setValue(settings.get("outlet_dwl", 0.0))
             self.atm_pressure.setValue(settings.get("atm_pressure", 100000.0))
-            self.wall_function_combo.setCurrentText(settings.get("wall_function", "kqRWallFunction"))
+            self.wall_function_combo.setCurrentText(
+                settings.get("wall_function", "kqRWallFunction")
+            )
             self.wall_ks.setValue(settings.get("wall_ks", 0.0))
             self.mapped_avg_velocity.setValue(settings.get("mapped_avg_velocity", 0.0))
             self.mapped_target_patch.setText(settings.get("mapped_target_patch", ""))
@@ -486,7 +533,6 @@ class BoundaryTab(QWidget):
             self.patch_list.addItems(patches)
             self.patch_list.setCurrentRow(0)
 
-
     def write_0_directory(self):
         """Writes 0/U, 0/p_rgh, and 0/alpha.water boundaryField blocks."""
         self._on_case_dir_edited()
@@ -511,7 +557,9 @@ class BoundaryTab(QWidget):
             else:
                 fields = ["U", "p"]
 
-            u_boundary, p_boundary, alpha_boundary, warnings = self._build_boundary_dicts(profile)
+            u_boundary, p_boundary, alpha_boundary, warnings = (
+                self._build_boundary_dicts(profile)
+            )
 
             if warnings:
                 QMessageBox.warning(self, "Boundary Validation", "\n".join(warnings))
@@ -559,7 +607,9 @@ class BoundaryTab(QWidget):
                 + "\n".join(os.path.join(self.case_dir, "0", f) for f in fields),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Write Error", f"Failed writing boundary dictionaries:\n{e}")
+            QMessageBox.critical(
+                self, "Write Error", f"Failed writing boundary dictionaries:\n{e}"
+            )
 
     def _build_boundary_dicts(self, profile):
         u_boundary = {}
@@ -619,7 +669,9 @@ class BoundaryTab(QWidget):
                 if is_interfoam:
                     p_boundary[patch_name] = {
                         "type": "zeroGradient" if free_outfall else "fixedValue",
-                        "value": "uniform 0" if free_outfall else f"uniform {outlet_dwl}",
+                        "value": (
+                            "uniform 0" if free_outfall else f"uniform {outlet_dwl}"
+                        ),
                     }
                     alpha_boundary[patch_name] = {
                         "type": "inletOutlet",
@@ -629,7 +681,9 @@ class BoundaryTab(QWidget):
                 else:
                     p_boundary[patch_name] = {
                         "type": "fixedValue" if not free_outfall else "zeroGradient",
-                        "value": f"uniform {outlet_dwl}" if not free_outfall else "uniform 0",
+                        "value": (
+                            f"uniform {outlet_dwl}" if not free_outfall else "uniform 0"
+                        ),
                     }
             elif bc_type == "Atmosphere":
                 u_boundary[patch_name] = {
