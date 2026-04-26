@@ -4,10 +4,195 @@ from pyvistaqt import QtInteractor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                              QGroupBox, QLabel, QDoubleSpinBox, QSpinBox,
                              QPushButton, QFileDialog, QLineEdit, QTableWidget,
-                             QComboBox, QCheckBox, QFrame, QHeaderView, QScrollArea, QGridLayout, QMessageBox)
+                             QComboBox, QCheckBox, QFrame, QHeaderView, QScrollArea, QGridLayout, QMessageBox, QRadioButton)
 from PyQt6.QtCore import Qt
 
 from PyQt6.QtCore import pyqtSignal
+
+
+class MeshVolumeSelectorWidget(QGroupBox):
+    """Sub-widget for defining snappyHexMesh locationInMesh."""
+
+    location_changed = pyqtSignal(tuple)
+
+    def __init__(self, parent=None):
+        super().__init__("Mesh Volume Definition (locationInMesh)", parent)
+        self._active_mesh = None
+        self._blockmesh_bounds = None
+        self._setup_ui()
+        self._connect_signals()
+        self._on_auto_calculate_toggled(self.auto_calc_checkbox.isChecked())
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # 1) Logical mode selection.
+        self.mode_inside_radio = QRadioButton(
+            "Mesh INSIDE the surface (e.g., internal channel flow)"
+        )
+        self.mode_outside_radio = QRadioButton(
+            "Mesh OUTSIDE the surface (e.g., flow around a structure / terrain)"
+        )
+        self.mode_inside_radio.setChecked(True)
+        layout.addWidget(self.mode_inside_radio)
+        layout.addWidget(self.mode_outside_radio)
+
+        # 2) Point calculation method.
+        self.auto_calc_checkbox = QCheckBox(
+            "Auto-calculate coordinate from geometry centroid"
+        )
+        self.auto_calc_checkbox.setChecked(True)
+        layout.addWidget(self.auto_calc_checkbox)
+
+        # 3) Manual coordinate override.
+        manual_layout = QGridLayout()
+        manual_layout.addWidget(QLabel("X:"), 0, 0)
+        manual_layout.addWidget(QLabel("Y:"), 0, 2)
+        manual_layout.addWidget(QLabel("Z:"), 0, 4)
+
+        self.x_spin = QDoubleSpinBox()
+        self.y_spin = QDoubleSpinBox()
+        self.z_spin = QDoubleSpinBox()
+        for spin in (self.x_spin, self.y_spin, self.z_spin):
+            spin.setRange(-100000.0, 100000.0)
+            spin.setDecimals(6)
+            spin.setSingleStep(0.1)
+
+        manual_layout.addWidget(self.x_spin, 0, 1)
+        manual_layout.addWidget(self.y_spin, 0, 3)
+        manual_layout.addWidget(self.z_spin, 0, 5)
+        layout.addLayout(manual_layout)
+
+        # 4) Validation / feedback.
+        self.status_label = QLabel("Waiting for geometry and blockMesh extents...")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #888;")
+        layout.addWidget(self.status_label)
+
+    def _connect_signals(self):
+        self.auto_calc_checkbox.toggled.connect(self._on_auto_calculate_toggled)
+        self.mode_inside_radio.toggled.connect(self._on_mode_changed)
+        self.mode_outside_radio.toggled.connect(self._on_mode_changed)
+        self.x_spin.valueChanged.connect(self._emit_manual_change)
+        self.y_spin.valueChanged.connect(self._emit_manual_change)
+        self.z_spin.valueChanged.connect(self._emit_manual_change)
+
+    def set_context(self, active_mesh, blockmesh_bounds):
+        """
+        Updates context used by locationInMesh auto-calculation.
+
+        blockmesh_bounds uses PyVista ordering:
+        (xmin, xmax, ymin, ymax, zmin, zmax)
+        """
+        self._active_mesh = active_mesh
+        self._blockmesh_bounds = blockmesh_bounds
+        if self.auto_calc_checkbox.isChecked():
+            self.calculate_location_in_mesh()
+
+    def _on_auto_calculate_toggled(self, checked):
+        for spin in (self.x_spin, self.y_spin, self.z_spin):
+            spin.setEnabled(not checked)
+
+        if checked:
+            self.calculate_location_in_mesh()
+        else:
+            self.status_label.setText(
+                "Manual override active. Ensure point is inside valid retained region."
+            )
+            self.status_label.setStyleSheet("color: #e0a000;")
+
+    def _on_mode_changed(self, _checked):
+        if self.auto_calc_checkbox.isChecked():
+            self.calculate_location_in_mesh()
+
+    def _emit_manual_change(self):
+        if not self.auto_calc_checkbox.isChecked():
+            self.location_changed.emit(self.get_location_tuple())
+
+    def calculate_location_in_mesh(self):
+        """
+        Placeholder locationInMesh logic.
+
+        If INSIDE is selected:
+        - Use pyvista or standard math to find the geometric centroid of active STL.
+        - Here, mesh.center is used as a practical centroid proxy.
+
+        If OUTSIDE is selected:
+        - Calculate a point safely in blockMesh extents but outside STL bounds.
+        - Example: x = xmin + 1%, y = ymin + 1%, z = zmax - 1%
+        """
+        if self._blockmesh_bounds is None:
+            self.status_label.setText("BlockMesh bounds are not available yet.")
+            self.status_label.setStyleSheet("color: #d9534f;")
+            return
+
+        xmin, xmax, ymin, ymax, zmin, zmax = self._blockmesh_bounds
+
+        if self.mode_inside_radio.isChecked():
+            if self._active_mesh is None:
+                self.status_label.setText("No active geometry loaded for INSIDE centroid calculation.")
+                self.status_label.setStyleSheet("color: #d9534f;")
+                return
+            point = tuple(float(v) for v in self._active_mesh.center)
+        else:
+            point = (
+                float(xmin + 0.01 * (xmax - xmin)),
+                float(ymin + 0.01 * (ymax - ymin)),
+                float(zmax - 0.01 * (zmax - zmin)),
+            )
+
+        self._set_point(point)
+        self.location_changed.emit(point)
+
+    def _set_point(self, point):
+        for spin, value in ((self.x_spin, point[0]), (self.y_spin, point[1]), (self.z_spin, point[2])):
+            was_blocked = spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(was_blocked)
+        self._update_status_feedback(point)
+
+    def _update_status_feedback(self, point):
+        if self._blockmesh_bounds is None:
+            return
+
+        x, y, z = point
+        xmin, xmax, ymin, ymax, zmin, zmax = self._blockmesh_bounds
+        ranges = (
+            max(abs(xmax - xmin), 1e-9),
+            max(abs(ymax - ymin), 1e-9),
+            max(abs(zmax - zmin), 1e-9),
+        )
+        normalized_face_distance = min(
+            min(abs(x - xmin), abs(xmax - x)) / ranges[0],
+            min(abs(y - ymin), abs(ymax - y)) / ranges[1],
+            min(abs(z - zmin), abs(zmax - z)) / ranges[2],
+        )
+
+        if normalized_face_distance < 0.005:
+            self.status_label.setText(
+                "Warning: locationInMesh is very close to a blockMesh boundary face (<0.5%)."
+            )
+            self.status_label.setStyleSheet("color: #d9534f;")
+        elif normalized_face_distance < 0.02:
+            self.status_label.setText(
+                "Caution: locationInMesh is close to a boundary face. Consider moving inward."
+            )
+            self.status_label.setStyleSheet("color: #e0a000;")
+        else:
+            self.status_label.setText("locationInMesh point looks valid inside blockMesh bounds.")
+            self.status_label.setStyleSheet("color: #4caf50;")
+
+    def get_location_tuple(self):
+        return (
+            float(self.x_spin.value()),
+            float(self.y_spin.value()),
+            float(self.z_spin.value()),
+        )
+
+    def get_location_in_mesh_string(self):
+        """Formats locationInMesh exactly as '(X Y Z);' for OpenFOAM dicts."""
+        x, y, z = self.get_location_tuple()
+        return f"({x:.6g} {y:.6g} {z:.6g});"
 
 class MeshTab(QWidget):
     mesh_updated = pyqtSignal()
@@ -46,7 +231,7 @@ class MeshTab(QWidget):
         self.vis_frame.setStyleSheet("background-color: #2b2b2b")
         vis_layout = QVBoxLayout(self.vis_frame)
 
-        self.plotter = QtInteractor(self.vis_frame)
+        self.plotter = QtInteractor(self.vis_frame)  # type: ignore[arg-type]
         vis_layout.addWidget(self.plotter.interactor)
 
         self.plotter.show_axes()
@@ -136,6 +321,10 @@ class MeshTab(QWidget):
             self.plotter.show_axes()
             self.plotter.show_grid()
             self.plotter.reset_camera()
+
+            if hasattr(self, "mesh_volume_selector"):
+                self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+
             self.mesh_updated.emit()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not visualize blockMesh: {str(e)}")
@@ -252,7 +441,9 @@ class MeshTab(QWidget):
         layout.addWidget(QLabel("<b>Refinement Regions/Surfaces:</b>"))
         self.refinement_table = QTableWidget(0, 4)
         self.refinement_table.setHorizontalHeaderLabels(["Geometry Name", "Min Level", "Max Level", "Type"])
-        self.refinement_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header = self.refinement_table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.refinement_table)
 
         btn_layout = QHBoxLayout()
@@ -279,6 +470,11 @@ class MeshTab(QWidget):
         snap_layout.addWidget(self.explicit_feature_snap)
         layout.addLayout(snap_layout)
 
+        # --- locationInMesh Controls ---
+        self.mesh_volume_selector = MeshVolumeSelectorWidget(self)
+        self.mesh_volume_selector.location_changed.connect(self.on_location_in_mesh_changed)
+        layout.addWidget(self.mesh_volume_selector)
+
         # Generate Button
         self.btn_gen_snappy = QPushButton("Generate snappyHexMeshDict")
         self.btn_gen_snappy.clicked.connect(self.generate_snappyHexMeshDict)
@@ -304,6 +500,9 @@ class MeshTab(QWidget):
         self.blockmesh_inputs["Z"]["max"].setValue(dim_z)
         self.blockmesh_inputs["Z"]["cells"].setValue(cells_z)
 
+        if hasattr(self, "mesh_volume_selector"):
+            self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+
     def browse_geometry(self):
         """Opens a file dialog to select a base geometry and visualizes it."""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -313,7 +512,8 @@ class MeshTab(QWidget):
             self.geom_path_edit.setText(file_path)
             # Automatically add the file as a default surface refinement region
             geom_name = os.path.splitext(os.path.basename(file_path))[0]
-            self.add_refinement_row(default_name=geom_name)
+            if not self._has_refinement_geometry_name(geom_name):
+                self.add_refinement_row(default_name=geom_name)
 
             # Load and visualize the geometry
             try:
@@ -323,9 +523,37 @@ class MeshTab(QWidget):
                 self.plotter.show_axes()
                 self.plotter.show_grid()
                 self.plotter.reset_camera()
+
+                if hasattr(self, "mesh_volume_selector"):
+                    self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+
                 self.mesh_updated.emit()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to load geometry: {str(e)}")
+
+    def _has_refinement_geometry_name(self, name):
+        """Checks refinement table for an existing geometry-name row."""
+        for row in range(self.refinement_table.rowCount()):
+            widget = self.refinement_table.cellWidget(row, 0)
+            if isinstance(widget, QLineEdit) and widget.text().strip() == name:
+                return True
+        return False
+
+    def get_blockmesh_bounds(self):
+        """Returns blockMesh bounds in PyVista order: (xmin, xmax, ymin, ymax, zmin, zmax)."""
+        return (
+            self.blockmesh_inputs["X"]["min"].value(),
+            self.blockmesh_inputs["X"]["max"].value(),
+            self.blockmesh_inputs["Y"]["min"].value(),
+            self.blockmesh_inputs["Y"]["max"].value(),
+            self.blockmesh_inputs["Z"]["min"].value(),
+            self.blockmesh_inputs["Z"]["max"].value(),
+        )
+
+    def on_location_in_mesh_changed(self, _point):
+        """Slot reserved for future live previews or additional validation hooks."""
+        # Intentionally lightweight for now.
+        pass
 
     def add_refinement_row(self, default_name=""):
         """Dynamically adds a row to the refinement configuration table."""
@@ -395,11 +623,27 @@ class MeshTab(QWidget):
         """
         print("Generating snappyHexMeshDict...")
 
+        # Keep auto-calculated point fresh at generation time.
+        if self.mesh_volume_selector.auto_calc_checkbox.isChecked():
+            self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+
+        location_tuple = self.mesh_volume_selector.get_location_tuple()
+        location_in_mesh = self.mesh_volume_selector.get_location_in_mesh_string()
+        print(f"locationInMesh = {location_in_mesh}")
+
         # Example extraction:
         # parser = OpenFoamDictParser("C:/.../v2206/documents/snappyHexMeshDict.template")
         #
         # parser.set_value("castellatedMeshControls.maxLocalCells", self.max_local_cells.value())
         # parser.set_value("castellatedMeshControls.maxGlobalCells", self.max_global_cells.value())
+        #
+        # # locationInMesh can be written as a formatted OpenFOAM vector string.
+        # # location_in_mesh already includes semicolon, e.g. "(1.2 0.4 3.8);"
+        # parser.set_value("castellatedMeshControls.locationInMesh", location_in_mesh)
+        #
+        # # If your parser expects bare values without ';', use tuple-based formatting:
+        # x, y, z = location_tuple
+        # parser.set_value("castellatedMeshControls.locationInMesh", f"({x:.6g} {y:.6g} {z:.6g})")
         #
         # # Loop through refinement table to construct refinementSurfaces / refinementRegions
         # for row in range(self.refinement_table.rowCount()):
