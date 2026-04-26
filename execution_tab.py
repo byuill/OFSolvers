@@ -177,13 +177,16 @@ class ExecutionTab(QWidget):
 
     def run_qaqc(self):
         # 1. Directory Checks
-        missing = [d for d in ['0', 'constant', 'system'] if not os.path.exists(os.path.join(os.getcwd(), d))]
+        missing = [d for d in ['0', 'constant', 'system', 'constant/polyMesh'] if not os.path.exists(os.path.join(os.getcwd(), d))]
         if missing:
-            self.append_log(f"QAQC FAILED: Missing essential OpenFOAM directories: {', '.join(missing)}")
-        else:
-            self.append_log("QAQC PASS: '0', 'constant', and 'system' directories exist.")
-            # 2. Execute checkMesh
-            self.execute_command("checkMesh")
+            error_msg = f"QAQC FAILED: Missing essential OpenFOAM directories: {', '.join(missing)}"
+            self.append_log(error_msg)
+            QMessageBox.critical(self, "QAQC Error", error_msg)
+            return
+
+        self.append_log("QAQC PASS: '0', 'constant', 'system', and 'constant/polyMesh' directories exist.")
+        # 2. Execute checkMesh
+        self.execute_command("checkMesh")
 
     def run_decompose(self):
         self.execute_command("decomposePar")
