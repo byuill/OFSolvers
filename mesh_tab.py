@@ -1,10 +1,28 @@
 import os
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-                             QGroupBox, QLabel, QDoubleSpinBox, QSpinBox,
-                             QPushButton, QFileDialog, QLineEdit, QTableWidget,
-                             QComboBox, QCheckBox, QFrame, QHeaderView, QScrollArea, QGridLayout, QMessageBox, QRadioButton)
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QSplitter,
+    QGroupBox,
+    QLabel,
+    QDoubleSpinBox,
+    QSpinBox,
+    QPushButton,
+    QFileDialog,
+    QLineEdit,
+    QTableWidget,
+    QComboBox,
+    QCheckBox,
+    QFrame,
+    QHeaderView,
+    QScrollArea,
+    QGridLayout,
+    QMessageBox,
+    QRadioButton,
+)
 from PyQt6.QtCore import Qt
 
 from PyQt6.QtCore import pyqtSignal
@@ -130,7 +148,9 @@ class MeshVolumeSelectorWidget(QGroupBox):
 
         if self.mode_inside_radio.isChecked():
             if self._active_mesh is None:
-                self.status_label.setText("No active geometry loaded for INSIDE centroid calculation.")
+                self.status_label.setText(
+                    "No active geometry loaded for INSIDE centroid calculation."
+                )
                 self.status_label.setStyleSheet("color: #d9534f;")
                 return
             point = tuple(float(v) for v in self._active_mesh.center)
@@ -145,7 +165,11 @@ class MeshVolumeSelectorWidget(QGroupBox):
         self.location_changed.emit(point)
 
     def _set_point(self, point):
-        for spin, value in ((self.x_spin, point[0]), (self.y_spin, point[1]), (self.z_spin, point[2])):
+        for spin, value in (
+            (self.x_spin, point[0]),
+            (self.y_spin, point[1]),
+            (self.z_spin, point[2]),
+        ):
             was_blocked = spin.blockSignals(True)
             spin.setValue(value)
             spin.blockSignals(was_blocked)
@@ -179,7 +203,9 @@ class MeshVolumeSelectorWidget(QGroupBox):
             )
             self.status_label.setStyleSheet("color: #e0a000;")
         else:
-            self.status_label.setText("locationInMesh point looks valid inside blockMesh bounds.")
+            self.status_label.setText(
+                "locationInMesh point looks valid inside blockMesh bounds."
+            )
             self.status_label.setStyleSheet("color: #4caf50;")
 
     def get_location_tuple(self):
@@ -194,8 +220,10 @@ class MeshVolumeSelectorWidget(QGroupBox):
         x, y, z = self.get_location_tuple()
         return f"({x:.6g} {y:.6g} {z:.6g});"
 
+
 class MeshTab(QWidget):
     mesh_updated = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
@@ -236,7 +264,12 @@ class MeshTab(QWidget):
 
         self.plotter.show_axes()
         self.plotter.show_grid()
-        self.plotter.add_text("3D Visualization Window", font_size=12, color="white", position="upper_left")
+        self.plotter.add_text(
+            "3D Visualization Window",
+            font_size=12,
+            color="white",
+            position="upper_left",
+        )
 
         self.splitter.addWidget(self.vis_frame)
 
@@ -287,8 +320,10 @@ class MeshTab(QWidget):
             layout.addWidget(grading_spin, row, 4)
 
             self.blockmesh_inputs[axis] = {
-                'min': min_spin, 'max': max_spin,
-                'cells': cells_spin, 'grading': grading_spin
+                "min": min_spin,
+                "max": max_spin,
+                "cells": cells_spin,
+                "grading": grading_spin,
             }
 
         # Generate Button
@@ -323,18 +358,24 @@ class MeshTab(QWidget):
             self.plotter.reset_camera()
 
             if hasattr(self, "mesh_volume_selector"):
-                self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+                self.mesh_volume_selector.set_context(
+                    self.current_mesh, self.get_blockmesh_bounds()
+                )
 
             self.mesh_updated.emit()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Could not visualize blockMesh: {str(e)}")
+            QMessageBox.warning(
+                self, "Error", f"Could not visualize blockMesh: {str(e)}"
+            )
 
     def setup_diagnostics_section(self):
         """Sets up the Mesh Diagnostics & Fixes group box."""
         group_box = QGroupBox("3. Mesh Diagnostics & Fixes")
         layout = QVBoxLayout()
 
-        self.diagnostics_label = QLabel("No geometry loaded. Load an STL/OBJ to view diagnostics.")
+        self.diagnostics_label = QLabel(
+            "No geometry loaded. Load an STL/OBJ to view diagnostics."
+        )
         self.diagnostics_label.setWordWrap(True)
         self.diagnostics_label.setStyleSheet("color: #aaaaaa;")
         layout.addWidget(self.diagnostics_label)
@@ -363,13 +404,15 @@ class MeshTab(QWidget):
             mesh = self.current_mesh
             points = mesh.n_points
             cells = mesh.n_cells
-            volume = mesh.volume if hasattr(mesh, 'volume') else 'N/A'
-            manifold = mesh.is_manifold if hasattr(mesh, 'is_manifold') else 'N/A'
+            volume = mesh.volume if hasattr(mesh, "volume") else "N/A"
+            manifold = mesh.is_manifold if hasattr(mesh, "is_manifold") else "N/A"
 
-            diag_text = (f"<b>Points:</b> {points}<br>"
-                         f"<b>Cells:</b> {cells}<br>"
-                         f"<b>Volume:</b> {volume}<br>"
-                         f"<b>Is Manifold (Watertight):</b> {manifold}")
+            diag_text = (
+                f"<b>Points:</b> {points}<br>"
+                f"<b>Cells:</b> {cells}<br>"
+                f"<b>Volume:</b> {volume}<br>"
+                f"<b>Is Manifold (Watertight):</b> {manifold}"
+            )
             self.diagnostics_label.setText(diag_text)
         except Exception as e:
             self.diagnostics_label.setText(f"Error running diagnostics: {str(e)}")
@@ -382,22 +425,24 @@ class MeshTab(QWidget):
 
         try:
             mesh = self.current_mesh.clean()
-            if hasattr(mesh, 'triangulate'):
+            if hasattr(mesh, "triangulate"):
                 mesh = mesh.triangulate()
-            if hasattr(mesh, 'compute_normals'):
+            if hasattr(mesh, "compute_normals"):
                 mesh = mesh.compute_normals(consistent_normals=True)
 
             self.current_mesh = mesh
 
             # Re-render
             self.plotter.clear()
-            self.plotter.add_mesh(self.current_mesh, show_edges=True, color="lightgreen")
+            self.plotter.add_mesh(
+                self.current_mesh, show_edges=True, color="lightgreen"
+            )
             self.plotter.show_axes()
             self.plotter.show_grid()
             self.plotter.reset_camera()
 
             QMessageBox.information(self, "Success", "Mesh cleaned and fixed!")
-            self.run_diagnostics() # Update stats
+            self.run_diagnostics()  # Update stats
             self.mesh_updated.emit()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to fix mesh: {str(e)}")
@@ -440,7 +485,9 @@ class MeshTab(QWidget):
         # --- Refinement Regions/Surfaces (Dynamic Table) ---
         layout.addWidget(QLabel("<b>Refinement Regions/Surfaces:</b>"))
         self.refinement_table = QTableWidget(0, 4)
-        self.refinement_table.setHorizontalHeaderLabels(["Geometry Name", "Min Level", "Max Level", "Type"])
+        self.refinement_table.setHorizontalHeaderLabels(
+            ["Geometry Name", "Min Level", "Max Level", "Type"]
+        )
         header = self.refinement_table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -472,7 +519,9 @@ class MeshTab(QWidget):
 
         # --- locationInMesh Controls ---
         self.mesh_volume_selector = MeshVolumeSelectorWidget(self)
-        self.mesh_volume_selector.location_changed.connect(self.on_location_in_mesh_changed)
+        self.mesh_volume_selector.location_changed.connect(
+            self.on_location_in_mesh_changed
+        )
         layout.addWidget(self.mesh_volume_selector)
 
         # Generate Button
@@ -483,7 +532,9 @@ class MeshTab(QWidget):
         group_box.setLayout(layout)
         self.controls_layout.addWidget(group_box)
 
-    def update_from_conceptual_model(self, dim_x, dim_y, dim_z, cells_x, cells_y, cells_z):
+    def update_from_conceptual_model(
+        self, dim_x, dim_y, dim_z, cells_x, cells_y, cells_z
+    ):
         """
         Utility method to link Tab 1 conceptual extents to Tab 2 base mesh generation.
         Can be called by the main window controller when switching to this tab.
@@ -501,7 +552,9 @@ class MeshTab(QWidget):
         self.blockmesh_inputs["Z"]["cells"].setValue(cells_z)
 
         if hasattr(self, "mesh_volume_selector"):
-            self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+            self.mesh_volume_selector.set_context(
+                self.current_mesh, self.get_blockmesh_bounds()
+            )
 
     def browse_geometry(self):
         """Opens a file dialog to select a base geometry and visualizes it."""
@@ -525,7 +578,9 @@ class MeshTab(QWidget):
                 self.plotter.reset_camera()
 
                 if hasattr(self, "mesh_volume_selector"):
-                    self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+                    self.mesh_volume_selector.set_context(
+                        self.current_mesh, self.get_blockmesh_bounds()
+                    )
 
                 self.mesh_updated.emit()
             except Exception as e:
@@ -625,7 +680,9 @@ class MeshTab(QWidget):
 
         # Keep auto-calculated point fresh at generation time.
         if self.mesh_volume_selector.auto_calc_checkbox.isChecked():
-            self.mesh_volume_selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+            self.mesh_volume_selector.set_context(
+                self.current_mesh, self.get_blockmesh_bounds()
+            )
 
         location_tuple = self.mesh_volume_selector.get_location_tuple()
         location_in_mesh = self.mesh_volume_selector.get_location_in_mesh_string()

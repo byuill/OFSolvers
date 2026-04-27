@@ -66,7 +66,9 @@ class OpenFoamDictParser:
         lines.append("}")
         return "\n".join(lines) + "\n"
 
-    def _replace_or_append_boundary_field(self, content: str, new_boundary_block: str) -> str:
+    def _replace_or_append_boundary_field(
+        self, content: str, new_boundary_block: str
+    ) -> str:
         match = re.search(r"\bboundaryField\b\s*\{", content)
         if not match:
             if content.endswith("\n"):
@@ -79,7 +81,11 @@ class OpenFoamDictParser:
             # Fallback: append if malformed.
             return content + "\n\n" + new_boundary_block
 
-        return content[:match.start()] + new_boundary_block + content[closing_brace_idx + 1 :]
+        return (
+            content[: match.start()]
+            + new_boundary_block
+            + content[closing_brace_idx + 1 :]
+        )
 
     @staticmethod
     def _find_matching_brace(text: str, open_idx: int) -> int:
