@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from mesh_tab import MeshTab
+from turbulence_tab import TurbulenceTab
 from boundary_tab import BoundaryTab
 from geometry_tab import GeometryTab
 from terrain_tab import TerrainTab
@@ -65,9 +66,15 @@ class MainWindow(QMainWindow):
         self.tab_boundaries.set_solver_profile(self.solver_combo.currentText())
         self.tabs.addTab(self.tab_boundaries, "5. Boundary Conditions")
 
-        # Tab 6: Execution & Monitoring
+        # Tab 6: Turbulence Modeling
+        self.tab_turbulence = TurbulenceTab()
+        self.tabs.addTab(self.tab_turbulence, "6. Turbulence Modeling")
+        self.sim_combo.currentTextChanged.connect(self.tab_turbulence.update_regime)
+        self.tab_turbulence.update_regime(self.sim_combo.currentText())
+
+        # Tab 7: Execution & Monitoring
         self.tab_execution = ExecutionTab()
-        self.tabs.addTab(self.tab_execution, "6. Execution & Monitoring")
+        self.tabs.addTab(self.tab_execution, "7. Execution & Monitoring")
 
         # Global Run/Save Button
         self.run_button = QPushButton("Save Conceptual Model & Run Test")
@@ -78,6 +85,15 @@ class MainWindow(QMainWindow):
 
         left_widget = QWidget()
         layout = QVBoxLayout(left_widget)
+
+        # --- Simulation Type Selection ---
+        sim_group = QGroupBox("Simulation Type")
+        sim_layout = QVBoxLayout()
+        self.sim_combo = QComboBox()
+        self.sim_combo.addItems(["laminar", "RAS", "LES"])
+        sim_layout.addWidget(self.sim_combo)
+        sim_group.setLayout(sim_layout)
+        layout.addWidget(sim_group)
 
         # --- Solver Selection ---
         solver_group = QGroupBox("Solver Selection")
