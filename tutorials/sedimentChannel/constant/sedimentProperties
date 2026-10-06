@@ -1,0 +1,24 @@
+FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object sedimentProperties;
+}
+
+// SI scalar inputs. C: kg/m3. Mbed: kg/m2. Erosion: kg/m2/s.
+d50 1.25e-4;
+rhoSediment 2650;
+rhoFluid 1000;
+settlingNu 1e-6;
+settlingModel FergusonChurch;
+C1 18;
+C2 1;
+ScT 0.7;
+ScM 1;
+bedPatches (bed);
+thetaCrit 0.05;
+erosionRate 0; // enable a calibrated excess-Shields law for erosion
+ erosionExponent 1.5;
+maxSedimentCo 0.5;
+nSedimentCorrectors 2;

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Run a fresh COPY, preserving this tutorial and any pre-existing results.
+set -euo pipefail
+case_dir=${1:-$(mktemp -d /tmp/sediment-channel-XXXXXX)}
+mkdir -p "$case_dir"
+if [ -n "$(ls -A "$case_dir")" ]; then
+    echo "Destination must be empty: $case_dir" >&2
+    exit 1
+fi
+cp -a "$(dirname "$0")"/. "$case_dir"/
+cd "$case_dir"
+blockMesh > log.blockMesh 2>&1
+checkMesh > log.checkMesh 2>&1
+sedimentPimpleFoam > log.solver 2>&1
+cat log.checkMesh | tail -n 6
+tail -n 6 log.solver
+echo "Results: $case_dir"

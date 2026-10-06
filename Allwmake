@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")"
+if ! command -v wmake >/dev/null; then
+    echo 'Activate OpenFOAM v1912 first. In this cloud instance: source scripts/openfoam-env.sh' >&2
+    exit 1
+fi
+if [ "${WM_PROJECT_VERSION:-}" != v1912 ] && [ "${WM_PROJECT_VERSION:-}" != 1912 ]; then
+    echo "This implementation is tested on OpenFOAM.com v1912; detected ${WM_PROJECT_VERSION:-unknown}." >&2
+    exit 1
+fi
+wmake applications/solvers/sedimentPimpleFoam

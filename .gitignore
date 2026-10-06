@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# OpenFOAM-generated build outputs
+applications/**/Make/linux*/
+applications/**/lnInclude/

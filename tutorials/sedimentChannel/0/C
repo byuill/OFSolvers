@@ -1,0 +1,20 @@
+FoamFile
+{
+    version 2.0;
+    format ascii;
+    class volScalarField;
+    object C;
+}
+
+dimensions [1 -3 0 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{
+ // phiSed includes settling: reversal uses particle flux, not fluid flux.
+ upstream { type inletOutlet; phi phiSed; inletValue uniform 0.1; value uniform 0.1; }
+ downstream { type inletOutlet; phi phiSed; inletValue uniform 0; value uniform 0; }
+ // Solver supplies the Robin coefficients; these are initialization values.
+ bed { type mixed; refValue uniform 0; refGradient uniform 0; valueFraction uniform 0; value uniform 0; }
+ lid { type zeroGradient; }
+ sides { type empty; }
+}
