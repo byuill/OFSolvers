@@ -1,5 +1,8 @@
 # sedimentPimpleFoam
 
+User guide · [Getting started, Windows/WSL and ParaView](getting-started.md) ·
+[Other solver: Lagrangian sand](sandParcelPimpleFoam.md) · [Repository home](../README.md)
+
 Fixed-mesh, incompressible transient flow with dilute suspended **mass concentration**
 `C` [kg/m³] and finite, face-local bed inventory `Mbed` [kg/m²]. Sand does not feed
 back into density, momentum, viscosity or turbulence. Geometry and bed elevation
@@ -63,6 +66,96 @@ ran `wmakeLnIncludeAll`, built `wmake/src`, and linked the source tree's
 existing shared libraries rather than rebuilding OpenFOAM. These source and
 runtime directories must be retained together. For another version, adapt and
 revalidate the APIs; the build wrapper deliberately rejects untested versions.
+
+## Configure your own case
+
+Run these commands from the repository root after OpenFOAM activation. They copy
+the untouched tutorial into a fresh temporary case; choose a persistent location
+if you need to keep results beyond the current environment:
+
+```bash
+case_dir=$(mktemp -d /tmp/sediment-custom-XXXXXX)
+cp -a tutorials/sedimentChannel/. "$case_dir/"
+foamDictionary "$case_dir/constant/sedimentProperties" -entry d50 -set 0.00025
+foamDictionary "$case_dir/0/C" \
+    -entry boundaryField.upstream.inletValue -set 'uniform 0.2'
+foamDictionary "$case_dir/0/Mbed" \
+    -entry boundaryField.bed.value -set 'uniform 0.02'
+foamDictionary "$case_dir/system/controlDict" -entry endTime -set 2
+blockMesh -case "$case_dir" > "$case_dir/log.blockMesh" 2>&1
+checkMesh -case "$case_dir" > "$case_dir/log.checkMesh" 2>&1
+sedimentPimpleFoam -case "$case_dir" > "$case_dir/log.solver" 2>&1
+```
+
+This example uses 0.25-mm sediment, 0.2 kg/m³ incoming concentration and
+0.02 kg/m² initial bed storage. The incoming concentration is prescribed during
+inflow by `inletOutlet`; its boundary value updates during the solve. Other
+settings retain the example defaults, including `erosionRate 0`. To permit
+erosion, select a positive, calibrated `erosionRate` and appropriate `thetaCrit`
+and `erosionExponent` in `constant/sedimentProperties`. Erosion draws from the
+local stored bed mass and is capped when that mass is exhausted.
+
+| What to change | File/entry |
+| --- | --- |
+| Grain size, settling, diffusivity and bed exchange | `constant/sedimentProperties` |
+| Initial/incoming sediment concentration | `0/C`, internalField and upstream inletValue |
+| Initial bed inventory | `0/Mbed`, selected bed boundary value |
+| Fluid viscosity and turbulence model | `constant/transportProperties`, `constant/turbulenceProperties` |
+| Flow boundary conditions and initial pressure | `0/U`, `0/p` |
+| Mesh shape and resolution | `system/blockMeshDict` |
+| Duration, output interval and fluid Courant limit | `system/controlDict` |
+| Numerical schemes and solve tolerances | `system/fvSchemes`, `system/fvSolution` |
+
+Use the same patch names in the mesh, all field boundary dictionaries and
+`bedPatches`. If selecting RANS/LES/DES, supply the fields and boundary conditions
+required by that particular turbulence model. The supplied tutorial is laminar.
+
+The solver prints `Sediment budget: suspended=... bed=... externalOut=... residual=...`.
+Masses are kg, externalOut is kg/s, and residual is kg for that step. Check small
+budget residuals and nonnegative concentrations/bed inventory. To visualize the
+custom case, create `case.foam` inside it and follow the
+[ParaView instructions](getting-started.md#view-the-results-in-paraview).
+
+## Continue a saved run
+
+For the custom case above, extend from its latest saved time to 3 seconds:
+
+```bash
+foamDictionary "$case_dir/system/controlDict" -entry startFrom -set latestTime
+foamDictionary "$case_dir/system/controlDict" -entry endTime -set 3
+sedimentPimpleFoam -case "$case_dir" > "$case_dir/log.restart" 2>&1
+```
+
+Retain `C`, `Mbed`, `U`, `p` and required turbulence fields at the saved time.
+Do not run `blockMesh` again for an unchanged-mesh restart. Initial values in
+`0/Mbed` do not replace the saved inventory; missing saved Mbed is an error.
+
+## Run a fresh case on two MPI ranks
+
+This example uses a separate fresh case and a streamwise decomposition:
+
+```bash
+parallel_case=$(mktemp -d /tmp/sediment-parallel-XXXXXX)
+cp -a tutorials/sedimentChannel/. "$parallel_case/"
+cat > "$parallel_case/system/decomposeParDict" <<'EOF'
+FoamFile { version 2.0; format ascii; class dictionary; object decomposeParDict; }
+numberOfSubdomains 2;
+method simple;
+simpleCoeffs { n (2 1 1); delta 0.001; }
+EOF
+blockMesh -case "$parallel_case" > "$parallel_case/log.blockMesh" 2>&1
+checkMesh -case "$parallel_case" > "$parallel_case/log.checkMesh" 2>&1
+decomposePar -case "$parallel_case" > "$parallel_case/log.decomposePar" 2>&1
+mpirun -np 2 sedimentPimpleFoam -case "$parallel_case" -parallel \
+    > "$parallel_case/log.parallel" 2>&1
+reconstructPar -case "$parallel_case" -latestTime \
+    > "$parallel_case/log.reconstructPar" 2>&1
+```
+
+Reconstruction makes the latest result available for ordinary serial viewing.
+For parallel restart, retain the complete `processor*` directories and use
+`startFrom latestTime` with a later endTime. The ordinary C/Mbed fields can also
+be decomposed from a complete serial restart; include the bed boundary inventory.
 
 ## Transport and units
 

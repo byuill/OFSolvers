@@ -1,5 +1,9 @@
 # sandParcelPimpleFoam
 
+User guide · [Getting started, Windows/WSL and ParaView](getting-started.md) ·
+[Other solver: concentration and bed inventory](sedimentPimpleFoam.md) ·
+[Repository home](../README.md)
+
 A separate **Lagrangian** sand solver for the inspected OpenFOAM.com/OpenCFD
 **v1912** installation. Incompressible flow uses fixed-mesh PIMPLE. Sand travels
 as native `basicKinematicParcel` parcels, with inertia, sphere drag and
@@ -32,6 +36,97 @@ source its `etc/bashrc` instead of the cloud-specific script. On Windows, run
 OpenFOAM in an appropriate Linux/WSL installation; these are Linux C++ solvers,
 not Windows GUI executables. Version-specific APIs have not been validated on
 Foundation OpenFOAM, foam-extend or other OpenCFD releases.
+
+## Configure your own case
+
+Run from the repository root after OpenFOAM activation. Copy the supplied tutorial
+before editing it:
+
+```bash
+case_dir=$(mktemp -d /tmp/sand-parcel-custom-XXXXXX)
+cp -a tutorials/sandParcelChannel/. "$case_dir/"
+foamDictionary "$case_dir/constant/sandCloudProperties" \
+    -entry subModels.injectionModels.feed.massFeedRate -set 0.0002
+foamDictionary "$case_dir/constant/sandCloudProperties" \
+    -entry subModels.injectionModels.feed.width -set 0.02
+foamDictionary "$case_dir/constant/sandCloudProperties" \
+    -entry subModels.injectionModels.feed.profile -set uniform
+blockMesh -case "$case_dir" > "$case_dir/log.blockMesh" 2>&1
+checkMesh -case "$case_dir" > "$case_dir/log.checkMesh" 2>&1
+sandParcelPimpleFoam -case "$case_dir" > "$case_dir/log.solver" 2>&1
+```
+
+This uses a 0.0002 kg/s feed across a 0.02-m-wide strip for the original
+one-second injection, with uniformly random locations. The total prescribed
+feed is **0.0002 kg**, independent of strip width and computational parcel rate.
+Choose a persistent location instead of `/tmp` when retaining results.
+
+| What to change | File/entry |
+| --- | --- |
+| Feed rate, start, duration, size and strip geometry | `constant/sandCloudProperties`, subModels/injectionModels/feed |
+| Uniform/Rouse sampling and shear estimate | Same feed dictionary, profile and shearVelocityModel |
+| Grain density | `constant/sandCloudProperties`, constantProperties/rho0 |
+| Stick/rebound/escape wall behavior | Same file, subModels/localInteractionCoeffs |
+| Optional bed resuspension | Same file, top-level resuspension dictionary |
+| Fluid density and viscosity | `constant/transportProperties`, rho and nu |
+| Flow boundaries, turbulence and mesh | `0/U`, `0/p`, `constant/turbulenceProperties`, `system/blockMeshDict` |
+| Duration, output interval and time-step controls | `system/controlDict` |
+
+Use patch names that match the mesh and keep the entire feed rectangle on the
+inlet. Changing injection `duration` changes feed mass; changing only `endTime`
+controls how long transport continues. Increase `parcelsPerSecond` for finer
+sampling. To use a Rouse feed, retain or restore `profile Rouse` and configure
+the local or prescribed shear estimate as described below.
+
+For mobile/deposited mass, read `Sand inventory` in `log.solver`. Include native
+cumulative escaped mass when checking the injected-mass balance. To view parcels,
+create `case.foam` inside the result directory and enable the reader's `sandCloud`
+region using the [ParaView instructions](getting-started.md#view-the-results-in-paraview).
+
+## Continue a saved run
+
+For the one-second custom case above, continue transport to 2 seconds:
+
+```bash
+foamDictionary "$case_dir/system/controlDict" -entry startFrom -set latestTime
+foamDictionary "$case_dir/system/controlDict" -entry endTime -set 2
+sandParcelPimpleFoam -case "$case_dir" > "$case_dir/log.restart" 2>&1
+```
+
+The original one-second feed is already finished; this continues the existing
+parcels without extending injection. Keep the feed schedule and geometry unchanged
+and retain the complete saved cloud and uniform metadata. When resuspension is
+enabled, retain `sandResuspensionState` as well. See the
+[resuspension section](#optional-bed-resuspension) for first enabling that process
+on older results. Do not rebuild an unchanged mesh during restart.
+
+## Run a fresh case on two MPI ranks
+
+```bash
+parallel_case=$(mktemp -d /tmp/sand-parcel-parallel-XXXXXX)
+cp -a tutorials/sandParcelChannel/. "$parallel_case/"
+cat > "$parallel_case/system/decomposeParDict" <<'EOF'
+FoamFile { version 2.0; format ascii; class dictionary; object decomposeParDict; }
+numberOfSubdomains 2;
+method simple;
+simpleCoeffs { n (2 1 1); delta 0.001; }
+EOF
+blockMesh -case "$parallel_case" > "$parallel_case/log.blockMesh" 2>&1
+checkMesh -case "$parallel_case" > "$parallel_case/log.checkMesh" 2>&1
+decomposePar -case "$parallel_case" > "$parallel_case/log.decomposePar" 2>&1
+mpirun -np 2 sandParcelPimpleFoam -case "$parallel_case" -parallel \
+    > "$parallel_case/log.parallel" 2>&1
+reconstructPar -case "$parallel_case" -latestTime \
+    > "$parallel_case/log.reconstructPar" 2>&1
+```
+
+The feed rate is global across ranks. Parcels and their optional bed history
+transfer when crossing processor boundaries. Reconstruction supports viewing
+the latest cloud, but **parallel resuspension restart must use the original complete
+processor time directories with the same mesh and decomposition**. Its per-rank
+history is not remapped by `reconstructPar` or `decomposePar`. Set startFrom/endTime
+in the case controlDict and rerun `mpirun` with the same rank count to continue.
+Changing decomposition changes the inlet sampling realization.
 
 ## Feed definition
 
@@ -261,7 +356,7 @@ entrainment. Choose one threshold:
 | --- | --- | --- |
 | `Shields` | `criticalShields` (default 0.05) | `tau_b / [(rhoParticle-rhoFluid)*|g|*d*criticalShields]` |
 | `shearStress` | `criticalShearStress`, Pa | `tau_b / criticalShearStress` |
-| `nearBedVelocity` | `criticalVelocity`, m/s | `|tangential bed-owner-cell U| / criticalVelocity` |
+| `nearBedVelocity` | `criticalVelocity`, m/s | `magnitude(tangential bed-owner-cell U) / criticalVelocity` |
 
 For the tutorial's 0.125-mm quartz in freshwater, `criticalShields 0.05`
 corresponds to about **0.101 Pa**. The velocity option samples the adjacent cell
