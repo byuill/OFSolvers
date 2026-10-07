@@ -18,10 +18,13 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QLineEdit,
     QFileDialog,
+    QTextEdit,
 )
 from PyQt6.QtCore import Qt
 
 from openfoam_dict_parser import OpenFoamDictParser
+from foam_io import boundary_patches, write_case_files, value, entries
+from case_qaqc import PRESSURE_SOLVERS
 
 
 class BoundaryTab(QWidget):
@@ -31,17 +34,37 @@ class BoundaryTab(QWidget):
         self.mesh_tab = None
         self.current_patch_name = None
         self._loading_patch_state = False
-        self.case_dir = self._detect_case_directory()
+        self.case_dir = ''
+        self.mesh_patch_types = {}
+        self.dirty_patches = set()
         self.setup_ui()
+
+    def set_case_directory(self, path):
+        self.case_dir = path
+        self.case_dir_edit.setText(path)
+        self.current_patch_name = None
+        self.patch_list.clear()
+        self.patch_data.clear()
+        self.mesh_patch_types.clear()
+        self.dirty_patches.clear()
+        self.rebuild_boundaries.setChecked(False)
 
     def set_mesh_tab(self, mesh_tab):
         self.mesh_tab = mesh_tab
 
     def set_solver_profile(self, solver_name):
         """Synchronizes boundary writer profile with global solver selection."""
-        supported = {"interFoam", "pimpleFoam", "simpleFoam"}
-        profile = solver_name if solver_name in supported else "interFoam"
-        self.solver_profile_combo.setCurrentText(profile)
+        supported = {'interFoam'} | PRESSURE_SOLVERS
+        if self.solver_profile_combo.findText(solver_name) < 0:
+            self.solver_profile_combo.addItem(solver_name)
+        self.solver_profile_combo.setCurrentText(solver_name)
+        self.btn_write_0.setEnabled(solver_name in supported)
+        self.btn_write_0.setToolTip('Edits existing fluid fields only; advanced profiles require manual setup.'
+                                  if solver_name not in supported else 'Writes only edited patches; keeps other entries unchanged.')
+        is_inter = solver_name == 'interFoam'
+        self.atm_pressure.setSuffix(' Pa gauge' if is_inter else ' m²/s² gauge')
+        self.outlet_dwl.setSuffix(' Pa gauge' if is_inter else ' m²/s² gauge')
+        self.inlet_mwl.setEnabled(is_inter)
 
     def setup_ui(self):
         # Main layout using a Splitter
@@ -59,21 +82,20 @@ class BoundaryTab(QWidget):
 
         case_layout = QHBoxLayout()
         self.case_dir_edit = QLineEdit(self.case_dir)
+        self.case_dir_edit.setReadOnly(True)
         self.case_dir_edit.setPlaceholderText(
             "OpenFOAM case directory (contains 0/, constant/, system/)"
         )
         self.case_dir_edit.editingFinished.connect(self._on_case_dir_edited)
         btn_case_browse = QPushButton("Browse Case")
+        btn_case_browse.setEnabled(False)
+        btn_case_browse.setToolTip('Select the shared case folder at the top of the window.')
         btn_case_browse.clicked.connect(self.browse_case_directory)
         case_layout.addWidget(self.case_dir_edit)
         case_layout.addWidget(btn_case_browse)
         left_layout.addLayout(case_layout)
 
         self.patch_list = QListWidget()
-        # Add some placeholder patches for demonstration
-        self.patch_list.addItems(
-            ["inlet", "outlet", "bottom", "atmosphere", "side1", "side2"]
-        )
         self.patch_list.currentItemChanged.connect(self.on_patch_selected)
         left_layout.addWidget(self.patch_list)
 
@@ -100,7 +122,7 @@ class BoundaryTab(QWidget):
         type_layout.addWidget(QLabel("<b>Conceptual Boundary Type:</b>"))
         self.bc_type_combo = QComboBox()
         self.bc_type_combo.addItems(
-            ["Inlet", "Outlet", "Atmosphere", "Bed/Wall", "Symmetry", "Mapped"]
+            ['Inlet', 'Outlet', 'Atmosphere', 'Bed/Wall', 'Symmetry', 'Mapped', 'Empty', 'Preserve existing']
         )
         self.bc_type_combo.currentTextChanged.connect(self.on_bc_type_changed)
         type_layout.addWidget(self.bc_type_combo)
@@ -109,6 +131,7 @@ class BoundaryTab(QWidget):
         solver_layout = QHBoxLayout()
         solver_layout.addWidget(QLabel("<b>Solver Profile:</b>"))
         self.solver_profile_combo = QComboBox()
+        self.solver_profile_combo.setEnabled(False)
         self.solver_profile_combo.addItems(["interFoam", "pimpleFoam", "simpleFoam"])
         self.solver_profile_combo.setCurrentText("interFoam")
         solver_layout.addWidget(self.solver_profile_combo)
@@ -133,12 +156,28 @@ class BoundaryTab(QWidget):
         self.stacked_widget.addWidget(self.page_wall)  # Index 3
         self.stacked_widget.addWidget(self.page_symmetry)  # Index 4
         self.stacked_widget.addWidget(self.page_mapped)  # Index 5
+        for message in ('No flow is resolved normal to an empty patch (2-D cases).',
+                        'Existing coupled/advanced boundary dictionaries are preserved.'):
+            page = QWidget(); QVBoxLayout(page).addWidget(QLabel(message))
+            self.stacked_widget.addWidget(page)
 
         self.right_layout.addWidget(self.stacked_widget)
+        note = QLabel('Forms define replacement templates for edited patches. '
+                      'Existing on-disk conditions are shown below and remain unchanged until you edit and write.')
+        note.setWordWrap(True)
+        self.right_layout.addWidget(note)
+        self.native_preview = QTextEdit()
+        self.native_preview.setReadOnly(True)
+        self.native_preview.setMaximumHeight(110)
+        self.right_layout.addWidget(self.native_preview)
         self.right_layout.addStretch()  # Push everything up
 
         # Write Boundaries Button
-        self.btn_write_0 = QPushButton("Write '0' Directory Boundaries")
+        self.rebuild_boundaries = QCheckBox('Rebuild ALL fluid patch conditions for a changed mesh')
+        self.rebuild_boundaries.setToolTip('Replaces every flow boundary with the forms above; review every patch first. '
+                                          'Initial internal fields are preserved. Old files are backed up.')
+        self.right_layout.addWidget(self.rebuild_boundaries)
+        self.btn_write_0 = QPushButton('Write edited fluid boundaries in 0/')
         self.btn_write_0.setStyleSheet("font-weight: bold; padding: 10px;")
         self.btn_write_0.clicked.connect(self.write_0_directory)
         self.right_layout.addWidget(self.btn_write_0)
@@ -185,9 +224,7 @@ class BoundaryTab(QWidget):
         )
 
     def _on_case_dir_edited(self):
-        path = self.case_dir_edit.text().strip()
-        if path:
-            self.case_dir = path
+        pass  # Shared case selection owns the path.
 
     def browse_case_directory(self):
         selected = QFileDialog.getExistingDirectory(
@@ -200,8 +237,6 @@ class BoundaryTab(QWidget):
     def import_patches_from_boundary_file(self):
         """Imports real patch names from constant/polyMesh/boundary metadata."""
         self._on_case_dir_edited()
-        self.save_current_patch_settings()
-
         boundary_path = os.path.join(self.case_dir, "constant", "polyMesh", "boundary")
         if not os.path.isfile(boundary_path):
             QMessageBox.warning(
@@ -226,6 +261,8 @@ class BoundaryTab(QWidget):
             return
 
         patch_names = [entry["name"] for entry in patch_entries]
+        self.mesh_patch_types = {entry['name']: entry['type'] for entry in patch_entries}
+        self.current_patch_name = None
         self.patch_list.clear()
         self.patch_list.addItems(patch_names)
         self._seed_patch_defaults_from_boundary_types(patch_entries)
@@ -245,27 +282,7 @@ class BoundaryTab(QWidget):
         return text
 
     def _parse_boundary_file(self, boundary_path):
-        with open(boundary_path, "r", encoding="utf-8") as f:
-            text = f.read()
-
-        text = self._strip_foam_comments(text)
-        list_start = text.find("(")
-        list_end = text.rfind(")")
-        if list_start == -1 or list_end == -1 or list_end <= list_start:
-            return []
-
-        patch_section = text[list_start + 1 : list_end]
-        pattern = re.compile(r"\n\s*([A-Za-z0-9_.-]+)\s*\n\s*\{(.*?)\}", re.DOTALL)
-
-        entries = []
-        for match in pattern.finditer(patch_section):
-            name = match.group(1).strip()
-            body = match.group(2)
-            type_match = re.search(r"\btype\s+([^;\s]+)\s*;", body)
-            patch_type = type_match.group(1).strip() if type_match else "patch"
-            entries.append({"name": name, "type": patch_type})
-
-        return entries
+        return boundary_patches(boundary_path)
 
     def _seed_patch_defaults_from_boundary_types(self, patch_entries):
         """Initialize patch_data defaults from boundary patch types when not already present."""
@@ -273,7 +290,10 @@ class BoundaryTab(QWidget):
             "wall": "Bed/Wall",
             "symmetry": "Symmetry",
             "symmetryPlane": "Symmetry",
-            "empty": "Symmetry",
+            'empty': 'Empty',
+            'cyclic': 'Preserve existing',
+            'cyclicAMI': 'Preserve existing',
+            'processor': 'Preserve existing',
             "patch": "Outlet",
         }
 
@@ -286,10 +306,10 @@ class BoundaryTab(QWidget):
             self.patch_data[name] = {
                 "type": conceptual,
                 "inlet_flow_rate": 0.0,
-                "inlet_mwl": 0.0,
+                "inlet_mwl": 1.0,
                 "outlet_free_outfall": False,
                 "outlet_dwl": 0.0,
-                "atm_pressure": 100000.0,
+                "atm_pressure": 0.0,
                 "wall_function": "kqRWallFunction",
                 "wall_ks": 0.0,
                 "mapped_avg_velocity": 0.0,
@@ -303,20 +323,22 @@ class BoundaryTab(QWidget):
         layout = QFormLayout(page)
 
         info_label = QLabel(
-            "<i>Maps to: U (variableHeightFlowRateInletVelocity), alpha.water (variableHeightFlowRate)</i>"
+            '<i>Water discharge sets U. Single-phase profiles use flowRateInletVelocity; '
+            'interFoam also configures the inlet water fraction.</i>'
         )
         info_label.setWordWrap(True)
         layout.addRow(info_label)
 
         self.inlet_flow_rate = QDoubleSpinBox()
+        self.inlet_flow_rate.setDecimals(6)
         self.inlet_flow_rate.setRange(0.0, 100000.0)
         self.inlet_flow_rate.setSuffix(" m³/s")
         layout.addRow("Volumetric Flow Rate:", self.inlet_flow_rate)
 
         self.inlet_mwl = QDoubleSpinBox()
-        self.inlet_mwl.setRange(-100.0, 10000.0)
-        self.inlet_mwl.setSuffix(" m")
-        layout.addRow("Mean Water Level:", self.inlet_mwl)
+        self.inlet_mwl.setRange(0, 1)
+        self.inlet_mwl.setValue(1)
+        layout.addRow('Upper water-fraction bound (interFoam):', self.inlet_mwl)
 
         return page
 
@@ -324,7 +346,7 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Outlet Configuration")
         layout = QFormLayout(page)
 
-        info_label = QLabel("<i>Maps to: outletPhaseMeanVelocity or zeroGradient</i>")
+        info_label = QLabel('<i>Velocity uses inletOutlet; pressure uses a fixed gauge value or zeroGradient.</i>')
         info_label.setWordWrap(True)
         layout.addRow(info_label)
 
@@ -335,12 +357,13 @@ class BoundaryTab(QWidget):
         self.outlet_dwl = QDoubleSpinBox()
         self.outlet_dwl.setRange(-100.0, 10000.0)
         self.outlet_dwl.setSuffix(" m")
-        layout.addRow("Downstream Water Level:", self.outlet_dwl)
+        layout.addRow('Outlet gauge pressure:', self.outlet_dwl)
+        self.outlet_dwl.setToolTip('This is pressure, not downstream water elevation.')
 
         return page
 
     def toggle_outlet_wl(self, state):
-        """Disables the downstream water level input if free outfall is checked."""
+        """Disable the fixed-pressure input when zeroGradient is selected."""
         self.outlet_dwl.setEnabled(not state)
 
     def build_atmosphere_page(self):
@@ -354,9 +377,9 @@ class BoundaryTab(QWidget):
         layout.addRow(info_label)
 
         self.atm_pressure = QDoubleSpinBox()
-        self.atm_pressure.setRange(0.0, 200000.0)
-        self.atm_pressure.setDecimals(0)
-        self.atm_pressure.setValue(100000.0)
+        self.atm_pressure.setRange(-1e9, 1e9)
+        self.atm_pressure.setDecimals(3)
+        self.atm_pressure.setValue(0)
         self.atm_pressure.setSuffix(" Pa")
         layout.addRow("Reference Pressure:", self.atm_pressure)
 
@@ -366,13 +389,17 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Bed/Wall Configuration")
         layout = QFormLayout(page)
 
-        info_label = QLabel("<i>Maps to: Standard Wall Functions</i>")
+        info_label = QLabel('<i>Sets noSlip velocity and the fluid pressure condition. '
+                            'Turbulence wall fields require separate configuration.</i>')
+        info_label.setWordWrap(True)
         layout.addRow(info_label)
 
         self.wall_function_combo = QComboBox()
         self.wall_function_combo.addItems(
             ["kqRWallFunction", "nutkWallFunction", "nutkRoughWallFunction"]
         )
+        self.wall_function_combo.setEnabled(False)
+        self.wall_function_combo.setToolTip('Configure turbulence wall fields separately; this editor writes fluid fields only.')
         layout.addRow("Turbulence Wall Function:", self.wall_function_combo)
 
         self.wall_ks = QDoubleSpinBox()
@@ -380,6 +407,7 @@ class BoundaryTab(QWidget):
         self.wall_ks.setDecimals(5)
         self.wall_ks.setSingleStep(0.001)
         self.wall_ks.setSuffix(" m")
+        self.wall_ks.setEnabled(False)
         layout.addRow("Equivalent Sand Roughness (Ks):", self.wall_ks)
 
         return page
@@ -401,17 +429,20 @@ class BoundaryTab(QWidget):
         page = QGroupBox("Mapped Configuration")
         layout = QFormLayout(page)
 
-        info_label = QLabel("<i>Maps to: mapped or timeVaryingMappedFixedValue</i>")
+        info_label = QLabel('<i>Mapped conditions require manual native dictionary setup. '
+                            'This editor cannot write them.</i>')
         info_label.setWordWrap(True)
         layout.addRow(info_label)
 
         self.mapped_avg_velocity = QDoubleSpinBox()
         self.mapped_avg_velocity.setRange(-10000.0, 10000.0)
         self.mapped_avg_velocity.setSuffix(" m/s")
+        self.mapped_avg_velocity.setEnabled(False)
         layout.addRow("Average Velocity:", self.mapped_avg_velocity)
 
         self.mapped_target_patch = QLineEdit()
         self.mapped_target_patch.setPlaceholderText("e.g. internalPlane1")
+        self.mapped_target_patch.setEnabled(False)
         layout.addRow("Target Patch:", self.mapped_target_patch)
 
         return page
@@ -420,17 +451,26 @@ class BoundaryTab(QWidget):
 
     def on_patch_selected(self, current, previous):
         """Enables the configuration pane when a patch is selected."""
-        if previous and not self._loading_patch_state:
-            self.current_patch_name = previous.text()
-            self.save_current_patch_settings()
-
         if current:
             self.current_patch_name = current.text()
             self.right_widget_container.setEnabled(True)
             self.load_patch_settings(self.current_patch_name)
+            self.show_native_conditions(self.current_patch_name)
         else:
             self.current_patch_name = None
             self.right_widget_container.setEnabled(False)
+
+    def show_native_conditions(self, name):
+        preview = []
+        fields = ['U','p_rgh','alpha.water'] if self.solver_profile_combo.currentText() == 'interFoam' else ['U','p']
+        for field in fields:
+            try:
+                with open(os.path.join(self.case_dir,'0',field),encoding='utf-8') as stream:
+                    text = value(stream.read(),'boundaryField')[1:-1]
+                preview.append(field+': '+value(text,name))
+            except (OSError,ValueError):
+                preview.append(field+': no explicit patch entry could be read')
+        self.native_preview.setPlainText('\n'.join(preview))
 
     def on_bc_type_changed(self, bc_type):
         """Dynamically switches the visible input form based on the selected boundary type."""
@@ -443,6 +483,7 @@ class BoundaryTab(QWidget):
         """Save the currently visible form state for the active patch."""
         if self._loading_patch_state or not self.current_patch_name:
             return
+        self.dirty_patches.add(self.current_patch_name)
 
         self.patch_data[self.current_patch_name] = {
             "type": self.bc_type_combo.currentText(),
@@ -464,10 +505,10 @@ class BoundaryTab(QWidget):
             settings = {
                 "type": "Bed/Wall",
                 "inlet_flow_rate": 0.0,
-                "inlet_mwl": 0.0,
+                "inlet_mwl": 1.0,
                 "outlet_free_outfall": False,
                 "outlet_dwl": 0.0,
-                "atm_pressure": 100000.0,
+                "atm_pressure": 0.0,
                 "wall_function": "kqRWallFunction",
                 "wall_ks": 0.0,
                 "mapped_avg_velocity": 0.0,
@@ -478,12 +519,12 @@ class BoundaryTab(QWidget):
         try:
             self.bc_type_combo.setCurrentText(settings.get("type", "Bed/Wall"))
             self.inlet_flow_rate.setValue(settings.get("inlet_flow_rate", 0.0))
-            self.inlet_mwl.setValue(settings.get("inlet_mwl", 0.0))
+            self.inlet_mwl.setValue(settings.get("inlet_mwl", 1.0))
             self.outlet_free_outfall.setChecked(
                 settings.get("outlet_free_outfall", False)
             )
             self.outlet_dwl.setValue(settings.get("outlet_dwl", 0.0))
-            self.atm_pressure.setValue(settings.get("atm_pressure", 100000.0))
+            self.atm_pressure.setValue(settings.get("atm_pressure", 0.0))
             self.wall_function_combo.setCurrentText(
                 settings.get("wall_function", "kqRWallFunction")
             )
@@ -495,48 +536,15 @@ class BoundaryTab(QWidget):
         finally:
             self._loading_patch_state = False
 
-        self.save_current_patch_settings()
+        # Merely selecting a patch must not mark it for overwrite.
 
     def import_patches(self):
-        """Fallback patch import based on mesh/blockMesh extents when boundary metadata is unavailable."""
-        self.save_current_patch_settings()
-
-        patches = []
-        if self.mesh_tab:
-            if self.mesh_tab.current_mesh is not None:
-                patches = ["xMin", "xMax", "yMin", "yMax", "zMin", "zMax"]
-            else:
-                # From blockMesh inputs
-                try:
-                    _ = self.mesh_tab.blockmesh_inputs["X"]["min"].value()
-                    patches = ["xMin", "xMax", "yMin", "yMax", "zMin", "zMax"]
-                except Exception as e:
-                    print(f"Failed to read blockmesh inputs: {e}")
-
-        if patches:
-            for name in patches:
-                if name not in self.patch_data:
-                    self.patch_data[name] = {
-                        "type": "Bed/Wall",
-                        "inlet_flow_rate": 0.0,
-                        "inlet_mwl": 0.0,
-                        "outlet_free_outfall": False,
-                        "outlet_dwl": 0.0,
-                        "atm_pressure": 100000.0,
-                        "wall_function": "kqRWallFunction",
-                        "wall_ks": 0.0,
-                        "mapped_avg_velocity": 0.0,
-                        "mapped_target_patch": "",
-                    }
-
-            self.patch_list.clear()
-            self.patch_list.addItems(patches)
-            self.patch_list.setCurrentRow(0)
+        """Only import verified mesh patch names, never guesses from the preview."""
+        self.import_patches_from_boundary_file()
 
     def write_0_directory(self):
         """Writes 0/U, 0/p_rgh, and 0/alpha.water boundaryField blocks."""
         self._on_case_dir_edited()
-        self.save_current_patch_settings()
 
         if self.patch_list.count() == 0:
             QMessageBox.warning(self, "No Patches", "No patches available to write.")
@@ -552,17 +560,32 @@ class BoundaryTab(QWidget):
 
         try:
             profile = self.solver_profile_combo.currentText()
+            if profile not in ({'interFoam'} | PRESSURE_SOLVERS):
+                raise ValueError('This solver profile is not supported by the fluid boundary writer.')
             if profile == "interFoam":
                 fields = ["U", "p_rgh", "alpha.water"]
             else:
                 fields = ["U", "p"]
 
-            u_boundary, p_boundary, alpha_boundary, warnings = (
-                self._build_boundary_dicts(profile)
-            )
+            rebuild = self.rebuild_boundaries.isChecked()
+            u_boundary, p_boundary, alpha_boundary, warnings = self._build_boundary_dicts(profile, rebuild)
 
             if warnings:
-                QMessageBox.warning(self, "Boundary Validation", "\n".join(warnings))
+                raise ValueError('\n'.join(warnings))
+            if not self.dirty_patches and not rebuild:
+                raise ValueError('No boundary settings have been edited.')
+            actual = {p['name']: p['type'] for p in boundary_patches(
+                os.path.join(self.case_dir, 'constant/polyMesh/boundary'))}
+            if set(actual) != {self.patch_list.item(i).text() for i in range(self.patch_list.count())}:
+                raise ValueError('Patch list is stale. Import the current mesh boundary metadata again.')
+            targets = set(actual) if rebuild else self.dirty_patches
+            for patch in targets:
+                kind = self.patch_data[patch]['type']
+                if actual[patch] == 'empty' and kind != 'Empty':
+                    raise ValueError(f'{patch} is an empty mesh patch and must retain empty field conditions.')
+                if actual[patch] in ('cyclic','cyclicAMI','processor'):
+                    raise ValueError(f'{patch} is coupled; preserve and edit its advanced conditions manually.')
+            contents = {}
 
             u_parser = OpenFoamDictParser(
                 os.path.join(self.case_dir, "0", "U"),
@@ -571,7 +594,11 @@ class BoundaryTab(QWidget):
                 default_dimensions="[0 1 -1 0 0 0 0]",
                 default_internal_field="uniform (0 0 0)",
             )
-            u_parser.write(u_boundary)
+            for name in fields:
+                path = os.path.join(self.case_dir, '0', name)
+                if not os.path.isfile(path):
+                    raise ValueError(f'Missing 0/{name}; start from a complete case template.')
+            contents['0/U'] = u_parser.render({p: u_boundary[p] for p in targets}, merge=not rebuild)
 
             if profile == "interFoam":
                 p_parser = OpenFoamDictParser(
@@ -588,8 +615,8 @@ class BoundaryTab(QWidget):
                     default_dimensions="[0 0 0 0 0 0 0]",
                     default_internal_field="uniform 0",
                 )
-                p_parser.write(p_boundary)
-                alpha_parser.write(alpha_boundary)
+                contents['0/p_rgh'] = p_parser.render({p: p_boundary[p] for p in targets}, merge=not rebuild)
+                contents['0/alpha.water'] = alpha_parser.render({p: alpha_boundary[p] for p in targets}, merge=not rebuild)
             else:
                 p_parser = OpenFoamDictParser(
                     os.path.join(self.case_dir, "0", "p"),
@@ -598,20 +625,24 @@ class BoundaryTab(QWidget):
                     default_dimensions="[0 2 -2 0 0 0 0]",
                     default_internal_field="uniform 0",
                 )
-                p_parser.write(p_boundary)
+                contents['0/p'] = p_parser.render({p: p_boundary[p] for p in targets}, merge=not rebuild)
+            backup = write_case_files(self.case_dir, contents)
+            self.dirty_patches.clear()
+            self.rebuild_boundaries.setChecked(False)
 
             QMessageBox.information(
                 self,
                 "Success",
                 "Wrote boundaryField blocks to:\n"
-                + "\n".join(os.path.join(self.case_dir, "0", f) for f in fields),
+                + "\n".join(os.path.join(self.case_dir, "0", f) for f in fields)
+                + f'\nPrevious files: {backup}',
             )
         except Exception as e:
             QMessageBox.critical(
                 self, "Write Error", f"Failed writing boundary dictionaries:\n{e}"
             )
 
-    def _build_boundary_dicts(self, profile):
+    def _build_boundary_dicts(self, profile, rebuild=False):
         u_boundary = {}
         p_boundary = {}
         alpha_boundary = {}
@@ -628,10 +659,10 @@ class BoundaryTab(QWidget):
             bc_type = settings.get("type", "Bed/Wall")
 
             inlet_flow = settings.get("inlet_flow_rate", 0.0)
-            inlet_mwl = settings.get("inlet_mwl", 0.0)
+            inlet_mwl = settings.get("inlet_mwl", 1.0)
             free_outfall = settings.get("outlet_free_outfall", False)
             outlet_dwl = settings.get("outlet_dwl", 0.0)
-            atm_pressure = settings.get("atm_pressure", 100000.0)
+            atm_pressure = settings.get("atm_pressure", 0.0)
             mapped_avg_vel = settings.get("mapped_avg_velocity", 0.0)
             mapped_target = settings.get("mapped_target_patch", "")
 
@@ -640,6 +671,7 @@ class BoundaryTab(QWidget):
                     u_boundary[patch_name] = {
                         "type": "variableHeightFlowRateInletVelocity",
                         "flowRate": str(inlet_flow),
+                        'alpha': 'alpha.water',
                         "value": "uniform (0 0 0)",
                     }
                     p_boundary[patch_name] = {
@@ -654,7 +686,8 @@ class BoundaryTab(QWidget):
                     }
                 else:
                     u_boundary[patch_name] = {
-                        "type": "fixedValue",
+                        'type': 'flowRateInletVelocity',
+                        'volumetricFlowRate': str(inlet_flow),
                         "value": "uniform (0 0 0)",
                     }
                     p_boundary[patch_name] = {
@@ -707,12 +740,24 @@ class BoundaryTab(QWidget):
                         "value": f"uniform {atm_pressure}",
                     }
             elif bc_type == "Symmetry":
-                u_boundary[patch_name] = {"type": "symmetry"}
-                p_boundary[patch_name] = {"type": "symmetry"}
+                symmetry = self.mesh_patch_types.get(patch_name, 'symmetry')
+                if symmetry not in ('symmetry', 'symmetryPlane'):
+                    warnings.append(f'{patch_name}: mesh patch must have a matching symmetry type.')
+                u_boundary[patch_name] = {'type': symmetry}
+                p_boundary[patch_name] = {'type': symmetry}
                 if is_interfoam:
-                    alpha_boundary[patch_name] = {"type": "symmetry"}
+                    alpha_boundary[patch_name] = {'type': symmetry}
+            elif bc_type == 'Empty':
+                u_boundary[patch_name] = {'type': 'empty'}
+                p_boundary[patch_name] = {'type': 'empty'}
+                alpha_boundary[patch_name] = {'type': 'empty'}
+            elif bc_type == 'Preserve existing':
+                if rebuild or patch_name in self.dirty_patches:
+                    warnings.append(f'{patch_name}: this advanced boundary cannot be rewritten by the editor.')
             elif bc_type == "Mapped":
-                if not mapped_target:
+                if rebuild or patch_name in self.dirty_patches:
+                    warnings.append(f'{patch_name}: mapped boundary setup is not implemented; configure its native dictionary manually.')
+                if not mapped_target and patch_name in self.dirty_patches:
                     warnings.append(
                         f"Patch '{patch_name}' is Mapped but target patch is empty."
                     )

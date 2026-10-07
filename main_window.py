@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -13,7 +14,14 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QFormLayout,
     QGridLayout,
+    QScrollArea,
+    QLineEdit,
+    QFileDialog,
+    QMessageBox,
 )
+from PyQt6.QtCore import pyqtSignal
+from case_qaqc import SOLVERS
+from foam_io import value, scalar
 
 from mesh_tab import MeshTab
 from turbulence_tab import TurbulenceTab
@@ -21,9 +29,11 @@ from boundary_tab import BoundaryTab
 from geometry_tab import GeometryTab
 from terrain_tab import TerrainTab
 from execution_tab import ExecutionTab
+from sediment_tab import SedimentTab
 
 
 class MainWindow(QMainWindow):
+    case_directory_changed = pyqtSignal(str)
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OpenFOAM GUI")
@@ -33,6 +43,18 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+
+        self.case_dir = ''
+        case_layout = QHBoxLayout()
+        self.case_dir_edit = QLineEdit()
+        self.case_dir_edit.setPlaceholderText('Select the case folder used by all tabs')
+        self.case_dir_edit.setReadOnly(True)
+        self.case_browse_button = QPushButton('Select case folder')
+        self.case_browse_button.clicked.connect(self.browse_case_directory)
+        case_layout.addWidget(QLabel('Active case:'))
+        case_layout.addWidget(self.case_dir_edit, 1)
+        case_layout.addWidget(self.case_browse_button)
+        layout.addLayout(case_layout)
 
         # Tab Widget
         self.tabs = QTabWidget()
@@ -59,7 +81,6 @@ class MainWindow(QMainWindow):
         # Tab 5: Boundary Conditions
         self.tab_boundaries = BoundaryTab()
         self.tab_boundaries.set_mesh_tab(self.tab_mesh)
-        self.tab_mesh.mesh_updated.connect(self.tab_boundaries.import_patches)
         self.solver_combo.currentTextChanged.connect(
             self.tab_boundaries.set_solver_profile
         )
@@ -72,13 +93,22 @@ class MainWindow(QMainWindow):
         self.sim_combo.currentTextChanged.connect(self.tab_turbulence.update_regime)
         self.tab_turbulence.update_regime(self.sim_combo.currentText())
 
-        # Tab 7: Execution & Monitoring
+        self.tab_sediment = SedimentTab()
+        self.tabs.addTab(self.tab_sediment, '7. River Sediment')
+        self.solver_combo.currentTextChanged.connect(self.tab_sediment.set_solver)
+        self.tab_sediment.solver_changed.connect(self._sync_execution_solver)
+        self.tab_sediment.case_prepared.connect(self._on_starter_prepared)
+
+        # Tab 8: Execution & Monitoring
         self.tab_execution = ExecutionTab()
-        self.tabs.addTab(self.tab_execution, "7. Execution & Monitoring")
+        self.tabs.addTab(self.tab_execution, '8. Execution & Monitoring')
 
         # Global Run/Save Button
-        self.run_button = QPushButton("Save Conceptual Model & Run Test")
+        self.run_button = QPushButton('Save plan, time controls and mesh inputs')
         layout.addWidget(self.run_button)
+        self.solver_combo.currentTextChanged.connect(self.tab_execution.set_solver)
+        self.tab_execution.combo_solver.currentTextChanged.connect(self._sync_execution_solver)
+        self.tab_execution.busy_changed.connect(self.set_busy)
 
     def setup_conceptual_tab(self):
         main_h_layout = QHBoxLayout(self.tab_concept)
@@ -99,15 +129,7 @@ class MainWindow(QMainWindow):
         solver_group = QGroupBox("Solver Selection")
         solver_layout = QFormLayout()
         self.solver_combo = QComboBox()
-        self.solver_combo.addItems(
-            [
-                "interFoam",
-                "multiphaseEulerFoam",
-                "buoyantBoussinesqPimpleFoam",
-                "pimpleFoam",
-                "simpleFoam",
-            ]
-        )
+        self.solver_combo.addItems(SOLVERS)
         solver_layout.addRow("Solver:", self.solver_combo)
         solver_group.setLayout(solver_layout)
         layout.addWidget(solver_group)
@@ -116,11 +138,14 @@ class MainWindow(QMainWindow):
         extent_group = QGroupBox("Domain Extent (Meters)")
         extent_layout = QHBoxLayout()
         self.dim_x_spinbox = QDoubleSpinBox()
-        self.dim_x_spinbox.setRange(0.1, 100000.0)
+        self.dim_x_spinbox.setDecimals(6)
+        self.dim_x_spinbox.setRange(1e-6, 1e9)
         self.dim_y_spinbox = QDoubleSpinBox()
-        self.dim_y_spinbox.setRange(0.1, 100000.0)
+        self.dim_y_spinbox.setDecimals(6)
+        self.dim_y_spinbox.setRange(1e-6, 1e9)
         self.dim_z_spinbox = QDoubleSpinBox()
-        self.dim_z_spinbox.setRange(0.1, 100000.0)
+        self.dim_z_spinbox.setDecimals(6)
+        self.dim_z_spinbox.setRange(1e-6, 1e9)
 
         extent_layout.addWidget(QLabel("X:"))
         extent_layout.addWidget(self.dim_x_spinbox)
@@ -177,14 +202,16 @@ class MainWindow(QMainWindow):
         time_layout = QFormLayout()
 
         self.start_time_spinbox = QDoubleSpinBox()
-        self.start_time_spinbox.setRange(0.0, 100000.0)
+        self.start_time_spinbox.setDecimals(6)
+        self.start_time_spinbox.setRange(0.0, 1e9)
 
         self.end_time_spinbox = QDoubleSpinBox()
-        self.end_time_spinbox.setRange(0.1, 10000.0)
+        self.end_time_spinbox.setDecimals(6)
+        self.end_time_spinbox.setRange(1e-6, 1e9)
 
         self.delta_t_spinbox = QDoubleSpinBox()
-        self.delta_t_spinbox.setRange(0.00001, 1.0)
-        self.delta_t_spinbox.setDecimals(5)
+        self.delta_t_spinbox.setDecimals(8)
+        self.delta_t_spinbox.setRange(1e-8, 1000.0)
 
         time_layout.addRow("Start Time:", self.start_time_spinbox)
         time_layout.addRow("End Time:", self.end_time_spinbox)
@@ -195,11 +222,15 @@ class MainWindow(QMainWindow):
         # Push everything to the top
         layout.addStretch()
 
-        main_h_layout.addWidget(left_widget)
+        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left_widget)
+        main_h_layout.addWidget(left_scroll)
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        main_h_layout.addWidget(right_widget)
+        right_scroll = QScrollArea(); right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right_widget)
+        main_h_layout.addWidget(right_scroll)
 
         # --- Engineering Planning Assistant (Right Side) ---
         self.setup_courant_estimator(right_layout)
@@ -227,7 +258,8 @@ class MainWindow(QMainWindow):
         self.dt_result_label = QLabel("Max \u0394t: - s")
         self.dt_result_label.setStyleSheet("font-weight: bold;")
 
-        self.apply_dt_btn = QPushButton("Apply to controlDict")
+        self.apply_dt_btn = QPushButton('Use estimated time step')
+        self.apply_dt_btn.setToolTip('Updates the time-step input; Save plan writes it to controlDict.')
 
         layout.addRow("Max Expected Vel (m/s):", self.max_vel_spinbox)
         layout.addRow("Target Min Cell Size (m):", self.min_cell_spinbox)
@@ -355,3 +387,56 @@ class MainWindow(QMainWindow):
         else:
             self.mesh_est_label.setText("Est. Cells: N/A")
             self.mesh_est_label.setStyleSheet("font-weight: bold;")
+
+    def _sync_execution_solver(self, name):
+        if self.solver_combo.findText(name) < 0:
+            self.solver_combo.addItem(name)
+        self.solver_combo.setCurrentText(name)
+
+    def browse_case_directory(self):
+        path = QFileDialog.getExistingDirectory(self, 'Select OpenFOAM case folder', self.case_dir)
+        if path:
+            self.set_case_directory(path)
+
+    def set_case_directory(self, path):
+        if self.tab_execution.worker is not None:
+            return
+        folder = Path(path).expanduser().resolve()
+        if not folder.is_dir():
+            raise ValueError('Case folder does not exist.')
+        self.case_dir = str(folder)
+        self.case_dir_edit.setText(self.case_dir)
+        for tab in (self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
+                    self.tab_execution, self.tab_terrain, self.tab_sediment):
+            tab.set_case_directory(self.case_dir)
+        self.case_directory_changed.emit(self.case_dir)
+        control = folder/'system/controlDict'
+        if control.exists():
+            try:
+                text = control.read_text()
+                self._sync_execution_solver(value(text, 'application'))
+                for name, spin in [('startTime', self.start_time_spinbox),
+                                   ('endTime', self.end_time_spinbox), ('deltaT', self.delta_t_spinbox)]:
+                    spin.setValue(scalar(text, name))
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, 'Case controls', f'Could not load all time controls: {exc}')
+
+    def _on_starter_prepared(self, path, solver):
+        self.set_case_directory(path)
+        self._sync_execution_solver(solver)
+
+    def set_busy(self, running):
+        self.case_browse_button.setEnabled(not running)
+        self.run_button.setEnabled(not running)
+        for i in range(self.tabs.count()-1):
+            self.tabs.setTabEnabled(i, not running)
+
+    def closeEvent(self, event):
+        worker = self.tab_execution.worker
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            if not worker.wait(3000):
+                event.ignore()
+                return
+        self.tab_mesh.plotter.close()
+        event.accept()

@@ -1,7 +1,8 @@
 # sedimentPimpleFoam
 
 User guide · [Getting started, Windows/WSL and ParaView](getting-started.md) ·
-[Other solver: Lagrangian sand](sandParcelPimpleFoam.md) · [Repository home](../README.md)
+[Other solver: Lagrangian sand](sandParcelPimpleFoam.md) · [River GUI setup](gui-user-guide.md) ·
+[Repository home](../README.md)
 
 Fixed-mesh, incompressible transient flow with dilute suspended **mass concentration**
 `C` [kg/m³] and finite, face-local bed inventory `Mbed` [kg/m²]. Sand does not feed

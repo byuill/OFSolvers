@@ -1,4 +1,7 @@
 from PyQt6.QtWidgets import QMessageBox
+import json
+from pathlib import Path
+from foam_io import update_values, write_case_files
 
 
 class CaseController:
@@ -47,6 +50,7 @@ class CaseController:
             self.model.cells_x,
             self.model.cells_y,
             self.model.cells_z,
+            self.model.boundaries,
         )
 
     def update_advice(self):
@@ -103,29 +107,39 @@ class CaseController:
         end_time = self.view.end_time_spinbox.value()
         delta_t = self.view.delta_t_spinbox.value()
 
-        self.model.update_conceptual_data(
-            solver,
-            dim_x,
-            dim_y,
-            dim_z,
-            cells_x,
-            cells_y,
-            cells_z,
-            boundaries,
-            start_time,
-            end_time,
-            delta_t,
-        )
+        if not self.view.case_dir:
+            QMessageBox.warning(self.view, 'Select a case', 'Select a case folder before saving.')
+            return
+        try:
+            self.model.update_conceptual_data(
+                solver,
+                dim_x,
+                dim_y,
+                dim_z,
+                cells_x,
+                cells_y,
+                cells_z,
+                boundaries,
+                start_time,
+                end_time,
+                delta_t,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self.view, 'Invalid plan', str(exc))
+            return
 
-        # 2. Get case data and trigger OpenFOAM scripts
+        # Save the plan and explicit time controls; execution is a separate tab.
         case_data = self.model.get_case_dict()
-        print("--- Conceptual Model Saved ---")
-        print(f"Solver: {case_data['solver']}")
-        print(f"Domain Extent (m): {case_data['domain']}")
-        print(f"Domain Resolution (cells): {case_data['resolution']}")
-        print(f"Boundaries: {case_data['boundaries']}")
-        print(
-            f"Simulation Period: {case_data['startTime']} to {case_data['endTime']} (dt={case_data['deltaT']})"
-        )
-
-        # Future: Insert blockMesh generation and OpenFOAM execution logic here
+        try:
+            files = {'ofsolvers-plan.json': json.dumps(case_data, indent=2)+'\n'}
+            control = Path(self.view.case_dir)/'system/controlDict'
+            if control.exists():
+                files['system/controlDict'] = update_values(control.read_text(), {
+                    'application': solver, 'startTime': start_time, 'endTime': end_time, 'deltaT': delta_t})
+            backup = write_case_files(self.view.case_dir, files)
+            QMessageBox.information(self.view, 'Plan saved',
+                'Saved the plan and updated mesh inputs. Existing controlDict time/solver entries were updated.\n'
+                'Mesh and required solver fields must still be generated/configured.\n'
+                + (f'Previous files: {backup}' if backup else ''))
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self.view, 'Save failed', str(exc))

@@ -24,13 +24,18 @@ from PyQt6.QtWidgets import (
     QApplication,
 )
 from PyQt6.QtCore import Qt
+from terrain_geometry import dem_solid
 
 
 class TerrainTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.filepath = None
+        self.case_dir = ''
         self.setup_ui()
+
+    def set_case_directory(self, path):
+        self.case_dir = path
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -74,12 +79,14 @@ class TerrainTab(QWidget):
 
         self.chk_normalize = QCheckBox("Reset Minima to (0,0,0)")
         self.chk_normalize.setChecked(True)
+        self.chk_fill_missing = QCheckBox('Fill missing cells with lowest valid elevation')
+        self.chk_fill_missing.setToolTip('Changes the terrain in NoData areas; cropping a valid DEM is preferable.')
 
         self.spin_factor = QSpinBox()
         self.spin_factor.setRange(1, 100)
         self.spin_factor.setValue(1)
         self.spin_factor.setToolTip(
-            "Downsample the grid (e.g. 2 skips every other pixel) to reduce triangle count."
+            'Reduce output rows/columns by this factor using raster resampling.'
         )
 
         self.spin_zscale = QDoubleSpinBox()
@@ -96,6 +103,7 @@ class TerrainTab(QWidget):
         )
 
         proc_layout.addRow(self.chk_normalize)
+        proc_layout.addRow(self.chk_fill_missing)
         proc_layout.addRow("Downsample Factor:", self.spin_factor)
         proc_layout.addRow("Z-Scale (Exaggeration):", self.spin_zscale)
         proc_layout.addRow("Extrusion Depth (m):", self.spin_extrude)
@@ -212,62 +220,8 @@ class TerrainTab(QWidget):
         QApplication.processEvents()
 
         try:
-            with rasterio.open(self.filepath) as src:
-                # Read the first band
-                data = src.read(1)
-                nodata = src.nodata
-                bounds = src.bounds
-
-            self.progress.setValue(30)
-            QApplication.processEvents()
-
-            # Flip the data vertically so Y ascends naturally (right-handed coordinates)
-            data = data[::-1, :]
-
-            # Apply downsampling factor
-            z = data[::factor, ::factor].astype(float)
-
-            # Mask out 'nodata' values to avoid crazy artifacts
-            if nodata is not None:
-                valid_z = z[z != nodata]
-                min_valid_z = np.nanmin(valid_z) if valid_z.size > 0 else 0
-                z[z == nodata] = min_valid_z
-            else:
-                min_valid_z = np.nanmin(z)
-
-            # Create 2D Grid X and Y arrays
-            ny, nx = z.shape
-            x = np.linspace(bounds.left, bounds.right, nx)
-            y = np.linspace(bounds.bottom, bounds.top, ny)
-            xx, yy = np.meshgrid(x, y)
-
-            self.progress.setValue(50)
-            QApplication.processEvents()
-
-            # Normalization
-            if normalize:
-                xx -= np.min(xx)
-                yy -= np.min(yy)
-                z -= np.min(z)
-                min_valid_z = 0.0
-
-            # Apply Z-scale
-            z *= z_scale
-            min_valid_z *= z_scale
-
-            # Build a 3D Structured Grid. By duplicating the xy grid twice in Z
-            # (Layer 0: flat base, Layer 1: the terrain), we instantly get a manifold solid.
-            bottom_z = np.full_like(z, min_valid_z - extrude_depth)
-
-            X = np.stack((xx, xx), axis=-1)
-            Y = np.stack((yy, yy), axis=-1)
-            Z = np.stack((bottom_z, z), axis=-1)
-
-            grid = pv.StructuredGrid(X, Y, Z)
-
-            # Extract the outer surface (makes it watertight)
-            solid = grid.extract_surface()
-
+            solid = dem_solid(self.filepath, factor, z_scale, extrude_depth,
+                              normalize, self.chk_fill_missing.isChecked())
             self.progress.setValue(75)
             QApplication.processEvents()
 
@@ -285,8 +239,7 @@ class TerrainTab(QWidget):
 
             # Ask where to save
             # Default to a likely OpenFOAM constant/triSurface layout relative to CWD if possible
-            default_dir = os.path.join(os.getcwd(), "constant", "triSurface")
-            os.makedirs(default_dir, exist_ok=True)
+            default_dir = os.path.join(self.case_dir, 'constant', 'triSurface') if self.case_dir else os.path.expanduser('~')
 
             save_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -305,7 +258,7 @@ class TerrainTab(QWidget):
                     f"Final Triangles: {solid.n_cells}",
                 )
 
-            self.progress.setValue(100)
+            self.progress.setValue(100 if save_path else 0)
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to generate STL:\n{str(e)}")

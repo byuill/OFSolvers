@@ -110,6 +110,9 @@ class GeometryTab(QWidget):
         self.btn_save.setStyleSheet("font-weight: bold; padding: 10px;")
         self.btn_save.clicked.connect(self.save_geometry)
         right_layout.addWidget(self.btn_save)
+        self.btn_use_mesh = QPushButton('Use selected geometry in Mesh Generation')
+        self.btn_use_mesh.clicked.connect(self.use_geometry_in_mesh)
+        right_layout.addWidget(self.btn_use_mesh)
 
         self.splitter.addWidget(right_widget)
         self.splitter.setSizes([300, 500])
@@ -255,7 +258,8 @@ class GeometryTab(QWidget):
                 f" Z: {b[4]:.3f} to {b[5]:.3f} (Height: {b[5]-b[4]:.3f})"
             )
             self.lbl_bounds.setText(bounds_txt)
-            self.lbl_volume.setText(f"Volume: {vol:.4f} m³")
+            self.lbl_volume.setText(f'Volume: {vol:.4f} m³' if mesh.is_manifold
+                                    else 'Volume: undefined for an open surface')
 
     def get_current_mesh(self) -> Tuple[Optional[str], Optional[pv.DataSet]]:
         item = self.geom_list.currentItem()
@@ -334,6 +338,9 @@ class GeometryTab(QWidget):
         scale_y = mesh_dy / geom_dy if geom_dy > 0 else float("inf")
         scale_z = mesh_dz / geom_dz if geom_dz > 0 else float("inf")
         scale_factor = min(scale_x, scale_y, scale_z)
+        if not np.isfinite(scale_factor) or scale_factor <= 0:
+            QMessageBox.warning(self, 'Invalid geometry', 'Geometry has no finite, nonzero extent.')
+            return
 
         # 1. Translate geometry to origin (center it)
         geom_center = np.array(geom_mesh.center)
@@ -389,3 +396,18 @@ class GeometryTab(QWidget):
                     QMessageBox.critical(
                         self, "Error", f"Failed to save file:\n{str(e)}"
                     )
+
+    def use_geometry_in_mesh(self):
+        name, mesh = self.get_current_mesh()
+        if mesh is None or self.mesh_tab is None:
+            return
+        tab = self.mesh_tab
+        tab.current_mesh = mesh.copy()
+        tab.geom_path_edit.setText(self.geometry_sources.get(name, name))
+        tab.refinement_table.setRowCount(0)
+        tab.add_refinement_row(os.path.splitext(os.path.basename(tab.geom_path_edit.text()))[0])
+        tab.plotter.clear()
+        tab.plotter.add_mesh(tab.current_mesh, show_edges=True)
+        tab.plotter.reset_camera()
+        tab.mesh_volume_selector.set_context(tab.current_mesh, tab.get_blockmesh_bounds())
+        tab.mesh_updated.emit()

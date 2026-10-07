@@ -1,11 +1,16 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QGroupBox, QLineEdit, QComboBox,
                              QStackedWidget, QFormLayout, QDoubleSpinBox, QPushButton, QLabel, QMessageBox)
 from PyQt6.QtCore import pyqtSlot
+from foam_io import write_case_files
 
 class TurbulenceTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.case_dir = ''
         self.setup_ui()
+
+    def set_case_directory(self, path):
+        self.case_dir = path
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -51,10 +56,10 @@ class TurbulenceTab(QWidget):
         # Page: kEpsilon
         self.page_kEpsilon = QWidget()
         kEps_layout = QFormLayout(self.page_kEpsilon)
-        self.spin_cmu = QDoubleSpinBox(); self.spin_cmu.setValue(0.09); self.spin_cmu.setDecimals(3)
-        self.spin_c1 = QDoubleSpinBox(); self.spin_c1.setValue(1.44); self.spin_c1.setDecimals(3)
-        self.spin_c2 = QDoubleSpinBox(); self.spin_c2.setValue(1.92); self.spin_c2.setDecimals(3)
-        self.spin_sigmaEps = QDoubleSpinBox(); self.spin_sigmaEps.setValue(1.3); self.spin_sigmaEps.setDecimals(3)
+        self.spin_cmu = QDoubleSpinBox(); self.spin_cmu.setDecimals(3); self.spin_cmu.setValue(0.09)
+        self.spin_c1 = QDoubleSpinBox(); self.spin_c1.setDecimals(3); self.spin_c1.setValue(1.44)
+        self.spin_c2 = QDoubleSpinBox(); self.spin_c2.setDecimals(3); self.spin_c2.setValue(1.92)
+        self.spin_sigmaEps = QDoubleSpinBox(); self.spin_sigmaEps.setDecimals(3); self.spin_sigmaEps.setValue(1.3)
         kEps_layout.addRow("Cmu:", self.spin_cmu)
         kEps_layout.addRow("C1:", self.spin_c1)
         kEps_layout.addRow("C2:", self.spin_c2)
@@ -64,11 +69,13 @@ class TurbulenceTab(QWidget):
         # Page: Smagorinsky
         self.page_smagorinsky = QWidget()
         smag_layout = QFormLayout(self.page_smagorinsky)
-        self.spin_ck = QDoubleSpinBox(); self.spin_ck.setValue(0.094); self.spin_ck.setDecimals(3)
-        self.spin_ce = QDoubleSpinBox(); self.spin_ce.setValue(1.048); self.spin_ce.setDecimals(3)
+        self.spin_ck = QDoubleSpinBox(); self.spin_ck.setDecimals(3); self.spin_ck.setValue(0.094)
+        self.spin_ce = QDoubleSpinBox(); self.spin_ce.setDecimals(3); self.spin_ce.setValue(1.048)
         smag_layout.addRow("Ck:", self.spin_ck)
         smag_layout.addRow("Ce:", self.spin_ce)
         self.stacked_widget.addWidget(self.page_smagorinsky)
+        for spin in (self.spin_cmu, self.spin_c1, self.spin_c2, self.spin_sigmaEps, self.spin_ck, self.spin_ce):
+            spin.setMinimum(0.001)
 
         param_layout.addWidget(self.stacked_widget)
         param_group.setLayout(param_layout)
@@ -95,10 +102,10 @@ class TurbulenceTab(QWidget):
             self.model_combo.addItem("None")
         elif regime_string == "RAS":
             self.model_combo.setEnabled(True)
-            self.model_combo.addItems(["kEpsilon", "kOmegaSST", "RNGkEpsilon", "realizableKE", "BuoyantkEpsilon"])
+            self.model_combo.addItems(['kEpsilon', 'kOmegaSST', 'RNGkEpsilon', 'realizableKE'])
         elif regime_string == "LES":
             self.model_combo.setEnabled(True)
-            self.model_combo.addItems(["Smagorinsky", "kEqn", "WALE", "DeardorffDiffSGS", "dynamicSmagorinsky"])
+            self.model_combo.addItems(['Smagorinsky', 'kEqn', 'WALE'])
 
     def on_model_changed(self, model_name):
         """Changes the stacked widget page based on the selected model."""
@@ -120,7 +127,11 @@ class TurbulenceTab(QWidget):
         model = self.model_combo.currentText()
 
         # Example of how this might look
-        output = f"simulationType {regime};\n\n"
+        if regime not in ('laminar', 'RAS', 'LES'):
+            QMessageBox.warning(self, 'Turbulence setup', 'Select a valid flow regime first.')
+            return
+        output = ('FoamFile { version 2.0; format ascii; class dictionary; object turbulenceProperties; }\n'
+                  + f'simulationType {regime};\n\n')
 
         if regime in ["RAS", "LES"]:
             output += f"{regime}\n{{\n"
@@ -140,6 +151,7 @@ class TurbulenceTab(QWidget):
                 output += f"    LESModel {model};\n"
                 output += "    turbulence on;\n"
                 output += "    printCoeffs on;\n"
+                output += '    delta cubeRootVol;\n'
 
                 if model == "Smagorinsky":
                     output += f"    SmagorinskyCoeffs\n    {{\n"
@@ -148,6 +160,11 @@ class TurbulenceTab(QWidget):
                     output += "    }\n"
             output += "}\n"
 
-        print("--- Generated turbulenceProperties ---")
-        print(output)
-        QMessageBox.information(self, "Success", "turbulenceProperties dictionary generated! (See console)")
+        try:
+            backup = write_case_files(self.case_dir, {'constant/turbulenceProperties': output})
+            QMessageBox.information(self, 'Saved',
+                'Wrote constant/turbulenceProperties.\n'
+                'Supply the initial turbulence fields and wall conditions required by this model; QAQC checks common models.\n'
+                + (f'Previous files: {backup}' if backup else ''))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, 'Write failed', str(exc))

@@ -1,7 +1,7 @@
 # Getting started with the sediment solvers
 
 [Repository home](../README.md) · [Concentration solver](sedimentPimpleFoam.md) ·
-[Particle solver](sandParcelPimpleFoam.md)
+[Particle solver](sandParcelPimpleFoam.md) · [River GUI](gui-user-guide.md)
 
 ## Choose a solver
 
@@ -52,8 +52,9 @@ command -v sandParcelPimpleFoam
 ```
 
 `Allwmake` builds both executables into the activated OpenFOAM user application
-directory (`FOAM_USER_APPBIN`). The solvers are run from a terminal; the repository's
-Python GUI does not automatically configure these new sediment models.
+directory (`FOAM_USER_APPBIN`). Run the solvers from a terminal or configure
+and run them using the desktop GUI's **River Sediment** and **Execution** tabs.
+See the [GUI guide](gui-user-guide.md) for Python dependencies and the workflow.
 
 In the **prepared Codex cloud environment**, use the existing checkout and its
 activation helper instead of the clone and normal-installation activation steps:
@@ -68,6 +69,11 @@ That helper depends on the matching source/runtime files already prepared under
 `/workspace`; copying the helper to a different computer does not install them.
 
 ## Windows and WSL
+
+On a managed Windows computer without administrator rights, use an IT-approved
+remote Linux installation/desktop or ask IT to provision WSL. The cloud folders
+are remote; installing WSL is unnecessary to inspect code on GitHub or download
+results. Follow the installation steps below only where your IT policy permits.
 
 Run the solvers inside Linux, such as WSL2. If WSL is not installed, open an
 administrator PowerShell window and run:
@@ -190,5 +196,6 @@ python3 tests/openfoam/validate_resuspension.py
 They check implementation behavior, conservation, restart and MPI, with additional
 model-specific checks. They require Python 3, MPI and the built solvers. The original
 Python application tests can be run separately with `python3 -m pytest -q` when
-their Python dependencies are installed. These checks do not calibrate the physical
+their Python dependencies are installed. The [GUI integration check](gui-user-guide.md#developer-verification)
+also exercises actual native workflows. These checks do not calibrate the physical
 models or replace mesh/time-step convergence studies.

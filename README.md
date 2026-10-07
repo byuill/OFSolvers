@@ -2,12 +2,15 @@
 
 This repository includes two custom sediment-transport solvers built from
 OpenFOAM's fixed-mesh PIMPLE flow equations, their example cases and user guides.
-The original Python/PyQt case-editing application is also retained.
+The Python/PyQt river preprocessing GUI configures both sediment solvers,
+initial and boundary conditions, mesh dictionaries and case/mesh QAQC.
 
 ## User guides
 
 Start with [Getting started](docs/getting-started.md) for installation requirements,
 building, running examples, finding files on Windows/WSL and viewing results.
+Use the [River GUI guide](docs/gui-user-guide.md) for the desktop setup workflow,
+sediment controls and QAQC.
 
 | Solver | Choose it when you need | Guide | Example case |
 | --- | --- | --- | --- |

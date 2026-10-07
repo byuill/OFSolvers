@@ -1,246 +1,292 @@
 import os
+import signal
 import subprocess
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
-    QRadioButton,
-    QSpinBox,
-    QComboBox,
-    QTextEdit,
-    QGroupBox,
-    QFormLayout,
-    QMessageBox,
-)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+import threading
+from pathlib import Path
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLabel, QRadioButton, QSpinBox, QComboBox, QTextEdit, QGroupBox,
+    QFormLayout)
+
+from case_qaqc import SOLVERS, check_case, mesh_passed
+from foam_io import write_case_files
 
 
 class OpenFOAMWorker(QThread):
-    """
-    Worker thread to execute OpenFOAM terminal commands without blocking the main GUI.
-    Captures stdout/stderr in real-time and emits it back to the main thread.
-    """
-
+    """Execute an argument list without a shell and reap it before finishing."""
     output_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(int)
 
-    def __init__(self, command, cwd=None, parent=None):
+    def __init__(self, command, cwd, parent=None):
         super().__init__(parent)
-        self.command = command
-        self.cwd = cwd if cwd else os.getcwd()
+        if isinstance(command, str):
+            raise TypeError('Commands must be argument lists.')
+        self.command = list(command)
+        self.cwd = str(cwd)
         self.process = None
-        self._is_running = True
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+
+    @property
+    def cancelled(self):
+        return self._cancelled.is_set()
+
+    def _signal_process(self, force=False):
+        with self._lock:
+            process = self.process
+            # The group can outlive its parent while a child holds stdout open.
+            if process is None or (process.poll() is not None and not force):
+                return
+            try:
+                if os.name == 'posix':
+                    os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                elif force:
+                    subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    process.terminate()
+            except ProcessLookupError:
+                pass
 
     def run(self):
-        self.output_signal.emit(f"--- Executing: {self.command} ---")
+        code = -1
+        self.output_signal.emit('--- Executing: ' + ' '.join(self.command) + ' ---')
+        self.output_signal.emit('Case: ' + self.cwd)
         try:
-            # Run the command, merging stderr into stdout, line-buffered
-            self.process = subprocess.Popen(
-                self.command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                shell=True,
-                cwd=self.cwd,
-                text=True,
-                bufsize=1,
-            )
-
-            # Read output line by line in real-time
-            for line in iter(self.process.stdout.readline, ""):
-                if not self._is_running:
-                    break
-                if line:
-                    self.output_signal.emit(line.strip())
-
-            self.process.stdout.close()
-            return_code = self.process.wait()
-
-            if self._is_running:
-                self.finished_signal.emit(return_code)
-
-        except Exception as e:
-            self.output_signal.emit(f"ERROR: Failed to execute command.\n{str(e)}")
-            self.finished_signal.emit(-1)
+            if not self.cancelled:
+                with self._lock:
+                    environment = os.environ.copy()
+                    environment['PWD'] = self.cwd
+                    self.process = subprocess.Popen(self.command, cwd=self.cwd,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, errors='replace', bufsize=1, shell=False,
+                        start_new_session=(os.name == 'posix'), env=environment)
+                if self.cancelled:
+                    self._signal_process()
+                for line in self.process.stdout:
+                    self.output_signal.emit(line.rstrip('\r\n'))
+                self.process.stdout.close()
+                code = self.process.wait()
+        except Exception as exc:
+            self.output_signal.emit(f'ERROR: Failed to execute command: {exc}')
+            self._signal_process(force=True)
+            if self.process is not None:
+                self.process.wait()
+        finally:
+            self.finished_signal.emit(code)
 
     def stop(self):
-        """Terminate the running process."""
-        self._is_running = False
-        if self.process:
-            self.process.terminate()
-            self.output_signal.emit("\n--- Process Terminated by User ---")
-            self.finished_signal.emit(-9)
+        self._cancelled.set()
+        self._signal_process()
+        timer = threading.Timer(2, self._signal_process, kwargs={'force': True})
+        timer.daemon = True
+        timer.start()
 
 
 class ExecutionTab(QWidget):
+    busy_changed = pyqtSignal(bool)
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.case_dir = ''
         self.worker = None
+        self._operation = None
+        self._output = []
         self.setup_ui()
 
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-
-        # 1. Environment Selection
-        env_group = QGroupBox("1. Environment Selection")
-        env_layout = QHBoxLayout(env_group)
-        self.rb_local = QRadioButton("Run Locally")
+        layout = QVBoxLayout(self)
+        self.case_label = QLabel('Select a case folder at the top of the window.')
+        self.case_label.setWordWrap(True)
+        layout.addWidget(self.case_label)
+        env = QGroupBox('Execution environment')
+        env_layout = QHBoxLayout(env)
+        self.rb_local = QRadioButton('Run on this Linux/OpenFOAM machine')
         self.rb_local.setChecked(True)
-        self.rb_hpc = QRadioButton("Run on ERDC Carpenter (HPC)")
+        self.rb_hpc = QRadioButton('HPC submission (not implemented)')
+        self.rb_hpc.setEnabled(False)
+        self.rb_hpc.setToolTip('Use your approved scheduler/SSH workflow outside this GUI.')
         env_layout.addWidget(self.rb_local)
         env_layout.addWidget(self.rb_hpc)
-        env_layout.addStretch()
-        main_layout.addWidget(env_group)
-
-        # 2. Pre-Flight QAQC
-        qaqc_group = QGroupBox("2. Pre-Flight QAQC")
-        qaqc_layout = QVBoxLayout(qaqc_group)
-        self.btn_qaqc = QPushButton("Run Simulation QAQC")
-        self.btn_qaqc.clicked.connect(self.run_qaqc)
-        qaqc_layout.addWidget(self.btn_qaqc)
-        main_layout.addWidget(qaqc_group)
-
-        # 3. Parallel Setup
-        parallel_group = QGroupBox("3. Parallel Setup")
-        parallel_layout = QFormLayout(parallel_group)
+        layout.addWidget(env)
+        parallel = QGroupBox('Solver and parallel setup')
+        form = QFormLayout(parallel)
+        self.combo_solver = QComboBox()
+        self.combo_solver.addItems(SOLVERS)
+        self.combo_solver.currentTextChanged.connect(lambda: self._clear_validation())
+        form.addRow('Target solver:', self.combo_solver)
         self.spin_cores = QSpinBox()
         self.spin_cores.setRange(1, 256)
-        self.spin_cores.setValue(4)
-        self.btn_decompose = QPushButton("Decompose Mesh (decomposePar)")
+        self.spin_cores.setValue(1)
+        self.spin_cores.valueChanged.connect(lambda: self._clear_validation())
+        form.addRow('MPI ranks (1 = serial):', self.spin_cores)
+        self.decompose_axis = QComboBox()
+        self.decompose_axis.addItems(['X','Y','Z'])
+        form.addRow('Uniform decomposition axis:', self.decompose_axis)
+        layout.addWidget(parallel)
+        self.btn_qaqc = QPushButton('Check case and mesh')
+        self.btn_qaqc.clicked.connect(self.run_qaqc)
+        self.btn_mesh = QPushButton('Generate initial mesh (blockMesh)')
+        self.btn_mesh.clicked.connect(self.run_block_mesh)
+        self.btn_decompose = QPushButton('Write decomposition and run decomposePar')
+        self.btn_decompose.setToolTip('Backs up the old dictionary; writes simple decomposition along the selected axis.')
         self.btn_decompose.clicked.connect(self.run_decompose)
-        parallel_layout.addRow("Number of Subdomains (Cores):", self.spin_cores)
-        parallel_layout.addRow(self.btn_decompose)
-        main_layout.addWidget(parallel_group)
-
-        # 4. Execution & Diagnostics
-        exec_group = QGroupBox("4. Execution & Diagnostics")
-        exec_layout = QVBoxLayout(exec_group)
-
-        solver_layout = QHBoxLayout()
-        solver_layout.addWidget(QLabel("Target Solver:"))
-        self.combo_solver = QComboBox()
-        self.combo_solver.addItems(["interFoam", "sedFoam", "simpleFoam", "pimpleFoam"])
-        solver_layout.addWidget(self.combo_solver)
-        solver_layout.addStretch()
-        exec_layout.addLayout(solver_layout)
-
-        self.btn_run = QPushButton("RUN SOLVER")
-        self.btn_run.setStyleSheet(
-            "font-size: 16px; font-weight: bold; background-color: #4CAF50; color: white; padding: 10px;"
-        )
+        self.btn_run = QPushButton('Run solver')
         self.btn_run.clicked.connect(self.run_solver)
-        exec_layout.addWidget(self.btn_run)
-
+        self.btn_reconstruct = QPushButton('Reconstruct latest results')
+        self.btn_reconstruct.clicked.connect(self.run_reconstruct)
+        for button in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run, self.btn_reconstruct):
+            layout.addWidget(button)
+        self.status_label = QLabel('Not checked')
+        layout.addWidget(self.status_label)
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setStyleSheet(
-            "background-color: #1e1e1e; color: #00FF00; font-family: Consolas, monospace;"
-        )
-        exec_layout.addWidget(self.console)
-
-        self.btn_stop = QPushButton("Stop/Kill Simulation")
-        self.btn_stop.setStyleSheet(
-            "background-color: #f44336; color: white; font-weight: bold;"
-        )
+        self.console.document().setMaximumBlockCount(10000)
+        layout.addWidget(self.console, 1)
+        self.btn_stop = QPushButton('Stop running command')
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_simulation)
-        exec_layout.addWidget(self.btn_stop)
+        layout.addWidget(self.btn_stop)
 
-        main_layout.addWidget(exec_group)
+    def set_case_directory(self, path):
+        self.case_dir = path
+        self.case_label.setText('Case: ' + path if path else 'Select a case folder.')
+        self._clear_validation()
 
-        # 5. Post-Processing
-        post_group = QGroupBox("5. Post-Processing")
-        post_layout = QVBoxLayout(post_group)
-        self.btn_reconstruct = QPushButton("Reconstruct Mesh (reconstructPar)")
-        self.btn_reconstruct.clicked.connect(self.run_reconstruct)
-        post_layout.addWidget(self.btn_reconstruct)
-        main_layout.addWidget(post_group)
+    def set_solver(self, name):
+        if self.combo_solver.findText(name) < 0:
+            self.combo_solver.addItem(name)
+        self.combo_solver.setCurrentText(name)
+
+    def _clear_validation(self):
+        self.status_label.setText('Not checked; run case and mesh checks before solving.')
 
     def append_log(self, text):
-        """Safely appends text to the QTextEdit console from the worker thread."""
-        self.console.append(text)
-        # Auto-scroll to bottom
-        scrollbar = self.console.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Solver output is plain text, even if it happens to contain HTML tags.
+        self.console.moveCursor(self.console.textCursor().MoveOperation.End)
+        self.console.insertPlainText(str(text) + '\n')
+        self.console.ensureCursorVisible()
 
     def toggle_ui_state(self, running):
-        """Enables/Disables buttons during execution to prevent concurrent commands."""
-        self.btn_qaqc.setEnabled(not running)
-        self.btn_decompose.setEnabled(not running)
-        self.btn_run.setEnabled(not running)
-        self.btn_reconstruct.setEnabled(not running)
+        for control in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run,
+                        self.btn_reconstruct, self.combo_solver, self.spin_cores, self.decompose_axis):
+            control.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+        self.busy_changed.emit(running)
 
-    def execute_command(self, command):
-        """Routes the command to the local QThread or HPC placeholder based on radio selection."""
-        if self.rb_hpc.isChecked():
-            self.run_on_hpc(command)
-            return
+    def _preflight(self, parallel=False):
+        report = check_case(self.case_dir, self.combo_solver.currentText(),
+                            self.spin_cores.value() if parallel else 1)
+        for message in report.warnings:
+            self.append_log('WARNING: ' + message)
+        for message in report.errors:
+            self.append_log('ERROR: ' + message)
+        if not report.ok:
+            self.status_label.setText('Case check failed; see the errors below.')
+        return report.ok
 
+    def execute_command(self, command, operation=None):
+        if self.worker is not None:
+            self.append_log('A command is already running; stop it or wait for completion.')
+            return False
+        if not self.case_dir or not Path(self.case_dir).is_dir():
+            self.append_log('Select an existing case folder first.')
+            return False
+        self._operation = operation
+        self._output = []
         self.toggle_ui_state(True)
-        self.worker = OpenFOAMWorker(command)
-        self.worker.output_signal.connect(self.append_log)
+        self.worker = OpenFOAMWorker(command, self.case_dir, self)
+        self.worker.output_signal.connect(self._receive_output)
         self.worker.finished_signal.connect(self.on_process_finished)
+        # Release the worker only after QThread itself has stopped.
+        self.worker.finished.connect(self._worker_finished)
         self.worker.start()
+        return True
 
-    def on_process_finished(self, returncode):
-        self.append_log(f"--- Process Finished (Exit Code: {returncode}) ---\n")
-        self.toggle_ui_state(False)
+    def _receive_output(self, line):
+        self.append_log(line)
+        if self._operation in ('qaqc', 'before_solver'):
+            self._output.append(line)
+
+    def on_process_finished(self, code):
+        cancelled = self.worker.cancelled
+        self.append_log(f'--- {"Cancelled" if cancelled else "Finished"} (exit code {code}) ---')
+        self._success = not cancelled and code == 0
+        if self._operation in ('qaqc', 'before_solver'):
+            self._success = not cancelled and mesh_passed('\n'.join(self._output), code)
+            self.status_label.setText('Case checks and checkMesh passed.' if self._success
+                                      else 'Mesh check failed or was cancelled; solver was not started.')
+        elif self._operation == 'solver':
+            self.status_label.setText('Solver completed.' if self._success else 'Solver failed or was cancelled.')
+
+    def _worker_finished(self):
+        worker = self.worker
         self.worker = None
+        operation = self._operation
+        self._operation = None
+        self.toggle_ui_state(False)
+        worker.deleteLater()
+        if operation == 'before_solver' and self._success:
+            solver = self.combo_solver.currentText()
+            ranks = self.spin_cores.value()
+            command = ['mpirun', '-np', str(ranks), solver, '-parallel'] if ranks > 1 else [solver]
+            self.execute_command(command, 'solver')
 
     def stop_simulation(self):
-        if self.worker:
+        if self.worker is not None:
+            self.btn_stop.setEnabled(False)
+            self.append_log('Stopping the running process and its process group...')
             self.worker.stop()
 
     def run_qaqc(self):
-        missing = [
-            d
-            for d in ["0", "constant", "system"]
-            if not os.path.exists(os.path.join(os.getcwd(), d))
-        ]
-        if missing:
-            self.append_log(
-                f"QAQC FAILED: Missing essential OpenFOAM directories: {', '.join(missing)}"
-            )
-        else:
-            self.append_log(
-                "QAQC PASS: '0', 'constant', and 'system' directories exist."
-            )
-            # 2. Execute checkMesh
-            self.execute_command("checkMesh")
+        if self._preflight(parallel=True):
+            self.status_label.setText('Case file checks passed; checking the mesh...')
+            self.execute_command(['checkMesh'], 'qaqc')
 
-    def run_decompose(self):
-        self.execute_command("decomposePar")
+    def run_block_mesh(self):
+        if not self.case_dir or not (Path(self.case_dir)/'system/blockMeshDict').exists():
+            self.append_log('Select a case with system/blockMeshDict first.')
+            return
+        if (Path(self.case_dir)/'constant/polyMesh/faces').exists():
+            self.append_log('A mesh already exists. Regenerate deliberately outside the GUI after preserving results.')
+            return
+        self.execute_command(['blockMesh'], 'mesh')
 
     def run_solver(self):
-        solver = self.combo_solver.currentText()
-        cores = self.spin_cores.value()
-        if cores > 1:
-            # Using mpirun for parallel execution
-            self.execute_command(f"mpirun -np {cores} {solver} -parallel")
-        else:
-            # Standard sequential run
-            self.execute_command(solver)
+        # Always recheck files and mesh; a previous PASS can become stale.
+        if self._preflight(parallel=True):
+            self.status_label.setText('Checking the mesh before starting the solver...')
+            self.execute_command(['checkMesh'], 'before_solver')
+
+    def run_decompose(self):
+        if self.worker is not None or not self._preflight():
+            return
+        ranks = self.spin_cores.value()
+        if ranks <= 1:
+            self.append_log('Select at least two MPI ranks before decomposing.')
+            return
+        if any(Path(self.case_dir).glob('processor[0-9]*')):
+            self.append_log('Processor folders already exist. Select a fresh case or manage existing decomposition outside the GUI.')
+            return
+        divisions = [1,1,1]
+        divisions[self.decompose_axis.currentIndex()] = ranks
+        text = ('FoamFile { version 2.0; format ascii; class dictionary; object decomposeParDict; }\n'
+                f'numberOfSubdomains {ranks};\nmethod simple;\n'
+                f'simpleCoeffs {{ n ({" ".join(map(str,divisions))}); delta 0.001; }}\n')
+        try:
+            backup = write_case_files(self.case_dir, {'system/decomposeParDict': text})
+            if backup:
+                self.append_log('Previous dictionary backed up to: ' + str(backup))
+        except (OSError, ValueError) as exc:
+            self.append_log('Cannot write decomposition: ' + str(exc))
+            return
+        self.execute_command(['decomposePar'], 'decompose')
 
     def run_reconstruct(self):
-        self.execute_command("reconstructPar")
+        if not self.case_dir or not any(Path(self.case_dir).glob('processor[0-9]*')):
+            self.append_log('No processor directories exist in the selected case.')
+            return
+        self.execute_command(['reconstructPar', '-latestTime'], 'reconstruct')
 
     def run_on_hpc(self, command):
-        """
-        Placeholder for HPC submission via ERDC Carpenter.
-        Future Implementation:
-        1. Use 'paramiko' library to establish an SSH connection to the HPC node.
-        2. Use SCPClient to push the local OpenFOAM case directory to the HPC scratch space.
-        3. Dynamically generate a PBS Pro submission script (e.g., #PBS -l select=...).
-        4. Execute 'qsub' via SSH.
-        5. Tail/poll the resulting log file over SSH to stream outputs back to this GUI.
-        """
-        self.append_log("--- HPC Execution Mode Selected ---")
-        self.append_log(f"[HPC Placeholder] Preparing to send command: {command}")
-        self.append_log(
-            "[HPC Placeholder] paramiko SSH connection to ERDC Carpenter pending..."
-        )
-        self.append_log(
-            "[HPC Placeholder] Case transfer (SCP) and PBS script submission omitted in placeholder."
-        )
+        self.append_log('HPC submission is not implemented. Use an approved remote Linux/scheduler workflow.')

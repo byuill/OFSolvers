@@ -1,6 +1,6 @@
 import os
-import re
 from typing import Dict
+from foam_io import atomic_write, entries, matching, tokens
 
 
 class OpenFoamDictParser:
@@ -26,12 +26,27 @@ class OpenFoamDictParser:
         self.default_internal_field = default_internal_field or "uniform 0"
 
     def write(self, boundary_field: Dict[str, Dict[str, str]]):
-        os.makedirs(os.path.dirname(self.target_path), exist_ok=True)
+        atomic_write(self.target_path, self.render(boundary_field))
+
+    def render(self, boundary_field, merge=False):
         content = self._read_or_create_template()
-        new_boundary_block = self._format_boundary_field(boundary_field)
-        updated = self._replace_or_append_boundary_field(content, new_boundary_block)
-        with open(self.target_path, "w", encoding="utf-8") as f:
-            f.write(updated)
+        if merge:
+            block = entries(content).get('boundaryField')
+            if block is None or not block.block:
+                raise ValueError('An existing boundaryField dictionary is required.')
+            body = content[block.value_start+1:block.value_end-1]
+            patches = entries(body)
+            replacements = []
+            for name, attrs in boundary_field.items():
+                item = patches.get(name)
+                if item is None or not item.block:
+                    raise ValueError(f'Patch {name} is not an explicit field boundary entry.')
+                replacement = self._format_boundary_field({name: attrs}).split('{', 1)[1].rsplit('}', 1)[0]
+                replacements.append((item.start, item.end, replacement.strip()))
+            for start, end, replacement in sorted(replacements, reverse=True):
+                body = body[:start]+replacement+body[end:]
+            return content[:block.value_start+1]+body+content[block.value_end-1:]
+        return self._replace_or_append_boundary_field(content, self._format_boundary_field(boundary_field))
 
     def _read_or_create_template(self) -> str:
         if os.path.exists(self.target_path):
@@ -61,7 +76,8 @@ class OpenFoamDictParser:
             lines.append(f"    {patch_name}")
             lines.append("    {")
             for key, value in attrs.items():
-                lines.append(f"        {key:<16}{value};")
+                width = max(16, len(key)+1)
+                lines.append(f'        {key:<{width}}{value};')
             lines.append("    }")
         lines.append("}")
         return "\n".join(lines) + "\n"
@@ -69,33 +85,25 @@ class OpenFoamDictParser:
     def _replace_or_append_boundary_field(
         self, content: str, new_boundary_block: str
     ) -> str:
-        match = re.search(r"\bboundaryField\b\s*\{", content)
-        if not match:
+        block = entries(content).get('boundaryField')
+        if block is None:
             if content.endswith("\n"):
                 return content + "\n" + new_boundary_block
             return content + "\n\n" + new_boundary_block
 
-        opening_brace_idx = content.find("{", match.start())
-        closing_brace_idx = self._find_matching_brace(content, opening_brace_idx)
-        if closing_brace_idx == -1:
-            # Fallback: append if malformed.
-            return content + "\n\n" + new_boundary_block
+        if not block.block:
+            raise ValueError('boundaryField must be a dictionary.')
 
         return (
-            content[: match.start()]
+            content[: block.start]
             + new_boundary_block
-            + content[closing_brace_idx + 1 :]
+            + content[block.end :]
         )
 
     @staticmethod
     def _find_matching_brace(text: str, open_idx: int) -> int:
-        depth = 0
-        for i in range(open_idx, len(text)):
-            c = text[i]
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return i
-        return -1
+        items = tokens(text)
+        for i, item in enumerate(items):
+            if item.start() == open_idx:
+                return items[matching(items, i)].start()
+        raise ValueError('Opening brace not found.')

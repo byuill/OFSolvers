@@ -2,7 +2,7 @@
 
 User guide · [Getting started, Windows/WSL and ParaView](getting-started.md) ·
 [Other solver: concentration and bed inventory](sedimentPimpleFoam.md) ·
-[Repository home](../README.md)
+[River GUI setup](gui-user-guide.md) · [Repository home](../README.md)
 
 A separate **Lagrangian** sand solver for the inspected OpenFOAM.com/OpenCFD
 **v1912** installation. Incompressible flow uses fixed-mesh PIMPLE. Sand travels

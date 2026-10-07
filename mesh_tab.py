@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+import tempfile
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PyQt6.QtWidgets import (
@@ -26,6 +28,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from PyQt6.QtCore import pyqtSignal
+from foam_io import write_case_files
+from mesh_config import block_mesh_dictionary, retained_point_valid, find_retained_point, snappy_dictionary
 
 
 class MeshVolumeSelectorWidget(QGroupBox):
@@ -57,7 +61,7 @@ class MeshVolumeSelectorWidget(QGroupBox):
 
         # 2) Point calculation method.
         self.auto_calc_checkbox = QCheckBox(
-            "Auto-calculate coordinate from geometry centroid"
+            "Find a verified point in the retained region"
         )
         self.auto_calc_checkbox.setChecked(True)
         layout.addWidget(self.auto_calc_checkbox)
@@ -125,41 +129,23 @@ class MeshVolumeSelectorWidget(QGroupBox):
 
     def _emit_manual_change(self):
         if not self.auto_calc_checkbox.isChecked():
+            self._update_status_feedback(self.get_location_tuple())
             self.location_changed.emit(self.get_location_tuple())
 
     def calculate_location_in_mesh(self):
-        """
-        Placeholder locationInMesh logic.
-
-        If INSIDE is selected:
-        - Use pyvista or standard math to find the geometric centroid of active STL.
-        - Here, mesh.center is used as a practical centroid proxy.
-
-        If OUTSIDE is selected:
-        - Calculate a point safely in blockMesh extents but outside STL bounds.
-        - Example: x = xmin + 1%, y = ymin + 1%, z = zmax - 1%
-        """
+        """Search for a verified point in the selected retained volume."""
         if self._blockmesh_bounds is None:
             self.status_label.setText("BlockMesh bounds are not available yet.")
             self.status_label.setStyleSheet("color: #d9534f;")
             return
 
-        xmin, xmax, ymin, ymax, zmin, zmax = self._blockmesh_bounds
-
-        if self.mode_inside_radio.isChecked():
-            if self._active_mesh is None:
-                self.status_label.setText(
-                    "No active geometry loaded for INSIDE centroid calculation."
-                )
-                self.status_label.setStyleSheet("color: #d9534f;")
-                return
-            point = tuple(float(v) for v in self._active_mesh.center)
-        else:
-            point = (
-                float(xmin + 0.01 * (xmax - xmin)),
-                float(ymin + 0.01 * (ymax - ymin)),
-                float(zmax - 0.01 * (zmax - zmin)),
-            )
+        try:
+            point = find_retained_point(self._blockmesh_bounds, self._active_mesh,
+                                        self.mode_inside_radio.isChecked())
+        except ValueError as exc:
+            self.status_label.setText(str(exc))
+            self.status_label.setStyleSheet('color: #d9534f;')
+            return
 
         self._set_point(point)
         self.location_changed.emit(point)
@@ -177,6 +163,13 @@ class MeshVolumeSelectorWidget(QGroupBox):
 
     def _update_status_feedback(self, point):
         if self._blockmesh_bounds is None:
+            return
+        try:
+            retained_point_valid(point, self._blockmesh_bounds, self._active_mesh,
+                                  self.mode_inside_radio.isChecked())
+        except ValueError as exc:
+            self.status_label.setText(str(exc))
+            self.status_label.setStyleSheet('color: #d9534f;')
             return
 
         x, y, z = point
@@ -204,7 +197,7 @@ class MeshVolumeSelectorWidget(QGroupBox):
             self.status_label.setStyleSheet("color: #e0a000;")
         else:
             self.status_label.setText(
-                "locationInMesh point looks valid inside blockMesh bounds."
+                'Point is inside the background mesh and on the selected side of the closed surface.'
             )
             self.status_label.setStyleSheet("color: #4caf50;")
 
@@ -226,7 +219,12 @@ class MeshTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.case_dir = ''
+        self.boundary_types = {}
         self.setup_ui()
+
+    def set_case_directory(self, path):
+        self.case_dir = path
 
     def setup_ui(self):
         # Main layout using a Splitter to separate controls from the 3D view
@@ -298,12 +296,14 @@ class MeshTab(QWidget):
 
             # Min Coord
             min_spin = QDoubleSpinBox()
-            min_spin.setRange(-100000.0, 100000.0)
+            min_spin.setDecimals(6)
+            min_spin.setRange(-1e9, 1e9)
             layout.addWidget(min_spin, row, 1)
 
             # Max Coord
             max_spin = QDoubleSpinBox()
-            max_spin.setRange(-100000.0, 100000.0)
+            max_spin.setDecimals(6)
+            max_spin.setRange(-1e9, 1e9)
             layout.addWidget(max_spin, row, 2)
 
             # Cells
@@ -510,11 +510,14 @@ class MeshTab(QWidget):
         snap_layout.addWidget(self.enable_snap_cb)
         snap_layout.addStretch()
 
-        snap_layout.addWidget(QLabel("explicitFeatureSnap:"))
+        snap_layout.addWidget(QLabel('Feature snap iterations:'))
         self.explicit_feature_snap = QSpinBox()
         self.explicit_feature_snap.setRange(0, 100)
         self.explicit_feature_snap.setValue(10)
         snap_layout.addWidget(self.explicit_feature_snap)
+        self.implicit_feature_snap = QCheckBox('Implicit feature snapping')
+        self.implicit_feature_snap.setChecked(True)
+        snap_layout.addWidget(self.implicit_feature_snap)
         layout.addLayout(snap_layout)
 
         # --- locationInMesh Controls ---
@@ -533,7 +536,7 @@ class MeshTab(QWidget):
         self.controls_layout.addWidget(group_box)
 
     def update_from_conceptual_model(
-        self, dim_x, dim_y, dim_z, cells_x, cells_y, cells_z
+        self, dim_x, dim_y, dim_z, cells_x, cells_y, cells_z, boundaries=None
     ):
         """
         Utility method to link Tab 1 conceptual extents to Tab 2 base mesh generation.
@@ -550,6 +553,10 @@ class MeshTab(QWidget):
         self.blockmesh_inputs["Z"]["min"].setValue(0.0)
         self.blockmesh_inputs["Z"]["max"].setValue(dim_z)
         self.blockmesh_inputs["Z"]["cells"].setValue(cells_z)
+        if boundaries:
+            self.boundary_types = {axis+side: 'wall' if boundaries[label] == 'Wall' else 'patch'
+                for axis, label_axis in [('x','X'),('y','Y'),('z','Z')]
+                for side, label in [('Min', 'Min '+label_axis), ('Max', 'Max '+label_axis)]}
 
         if hasattr(self, "mesh_volume_selector"):
             self.mesh_volume_selector.set_context(
@@ -612,6 +619,8 @@ class MeshTab(QWidget):
 
     def add_refinement_row(self, default_name=""):
         """Dynamically adds a row to the refinement configuration table."""
+        if not isinstance(default_name, str):
+            default_name = ''
         row = self.refinement_table.rowCount()
         self.refinement_table.insertRow(row)
 
@@ -643,71 +652,48 @@ class MeshTab(QWidget):
             self.refinement_table.removeRow(current_row)
 
     def generate_blockMeshDict(self):
-        """
-        Placeholder for generating blockMeshDict.
-        Demonstrates how the values are extracted and passed to the custom DictParser.
-        """
-        print("Generating blockMeshDict...")
-
-        # Example extraction:
-        # min_x = self.blockmesh_inputs["X"]["min"].value()
-        # max_x = self.blockmesh_inputs["X"]["max"].value()
-        # cells_x = self.blockmesh_inputs["X"]["cells"].value()
-        # grading_x = self.blockmesh_inputs["X"]["grading"].value()
-
-        # Example usage of the dictionary parser (pseudo-code):
-        # parser = OpenFoamDictParser("C:/.../v2206/documents/blockMeshDict.template")
-        #
-        # # Build the vertices block
-        # parser.set_value("vertices", [
-        #     f"({min_x} {min_y} {min_z})", f"({max_x} {min_y} {min_z})", ...
-        # ])
-        #
-        # # Build the blocks -> hex mapping
-        # parser.set_value("blocks", [
-        #     f"hex (0 1 2 3 4 5 6 7) ({cells_x} {cells_y} {cells_z}) simpleGrading ({grading_x} {grading_y} {grading_z})"
-        # ])
-        #
-        # parser.write("system/blockMeshDict")
-        print("blockMeshDict generated successfully! (Placeholder)")
+        try:
+            content = block_mesh_dictionary(self.get_blockmesh_bounds(),
+                tuple(self.blockmesh_inputs[a]['cells'].value() for a in 'XYZ'),
+                tuple(self.blockmesh_inputs[a]['grading'].value() for a in 'XYZ'),
+                self.boundary_types)
+            backup = write_case_files(self.case_dir, {'system/blockMeshDict': content})
+            QMessageBox.information(self, 'Dictionary saved',
+                f'Wrote {self.case_dir}/system/blockMeshDict.\nRun blockMesh in Execution to generate the mesh.\n'
+                + (f'Previous files: {backup}' if backup else ''))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, 'Mesh configuration', str(exc))
 
     def generate_snappyHexMeshDict(self):
-        """
-        Placeholder for generating snappyHexMeshDict.
-        Demonstrates compiling snappyHexMesh parameters to write to template.
-        """
-        print("Generating snappyHexMeshDict...")
-
-        # Keep auto-calculated point fresh at generation time.
-        if self.mesh_volume_selector.auto_calc_checkbox.isChecked():
-            self.mesh_volume_selector.set_context(
-                self.current_mesh, self.get_blockmesh_bounds()
-            )
-
-        location_tuple = self.mesh_volume_selector.get_location_tuple()
-        location_in_mesh = self.mesh_volume_selector.get_location_in_mesh_string()
-        print(f"locationInMesh = {location_in_mesh}")
-
-        # Example extraction:
-        # parser = OpenFoamDictParser("C:/.../v2206/documents/snappyHexMeshDict.template")
-        #
-        # parser.set_value("castellatedMeshControls.maxLocalCells", self.max_local_cells.value())
-        # parser.set_value("castellatedMeshControls.maxGlobalCells", self.max_global_cells.value())
-        #
-        # # locationInMesh can be written as a formatted OpenFOAM vector string.
-        # # location_in_mesh already includes semicolon, e.g. "(1.2 0.4 3.8);"
-        # parser.set_value("castellatedMeshControls.locationInMesh", location_in_mesh)
-        #
-        # # If your parser expects bare values without ';', use tuple-based formatting:
-        # x, y, z = location_tuple
-        # parser.set_value("castellatedMeshControls.locationInMesh", f"({x:.6g} {y:.6g} {z:.6g})")
-        #
-        # # Loop through refinement table to construct refinementSurfaces / refinementRegions
-        # for row in range(self.refinement_table.rowCount()):
-        #     geom_name = self.refinement_table.cellWidget(row, 0).text()
-        #     min_lvl = self.refinement_table.cellWidget(row, 1).value()
-        #     ... construct dictionary blocks based on Type ...
-        #
-        # parser.set_value("snap", "true" if self.enable_snap_cb.isChecked() else "false")
-        # parser.write("system/snappyHexMeshDict")
-        print("snappyHexMeshDict generated successfully! (Placeholder)")
+        try:
+            if self.current_mesh is None or not self.geom_path_edit.text():
+                raise ValueError('Load a geometry surface first.')
+            selector = self.mesh_volume_selector
+            if selector.auto_calc_checkbox.isChecked():
+                selector.set_context(self.current_mesh, self.get_blockmesh_bounds())
+            point = selector.get_location_tuple()
+            retained_point_valid(point, self.get_blockmesh_bounds(), self.current_mesh,
+                                 selector.mode_inside_radio.isChecked())
+            refinements = [(self.refinement_table.cellWidget(i,0).text().strip(),
+                            self.refinement_table.cellWidget(i,1).value(),
+                            self.refinement_table.cellWidget(i,2).value(),
+                            self.refinement_table.cellWidget(i,3).currentText())
+                           for i in range(self.refinement_table.rowCount())]
+            filename = Path(self.geom_path_edit.text()).name
+            content = snappy_dictionary(filename, refinements, point,
+                self.max_local_cells.value(), self.max_global_cells.value(),
+                self.enable_snap_cb.isChecked(), self.explicit_feature_snap.value(),
+                self.implicit_feature_snap.isChecked())
+            # Save the current cleaned/transformed surface, not the original file.
+            with tempfile.TemporaryDirectory(prefix='ofsolvers-surface-') as tmp:
+                surface = Path(tmp)/filename
+                self.current_mesh.extract_surface().triangulate().save(surface, binary=False)
+                backup = write_case_files(self.case_dir, {
+                    'system/snappyHexMeshDict': content,
+                    'constant/triSurface/'+filename: surface.read_bytes()})
+            QMessageBox.information(self, 'Dictionary saved',
+                'Saved snappyHexMeshDict and the active geometry in constant/triSurface.\n'
+                'Review settings, generate the background mesh, then run snappyHexMesh and checkMesh.\n'
+                + (f'Previous files: {backup}' if backup else ''))
+        except (OSError, ValueError, RuntimeError) as exc:
+            QMessageBox.warning(self, 'snappyHexMesh configuration', str(exc))
