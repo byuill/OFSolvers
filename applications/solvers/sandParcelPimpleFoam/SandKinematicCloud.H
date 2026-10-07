@@ -9,6 +9,7 @@
 #define SandKinematicCloud_H
 #include <unordered_map>
 #include "basicKinematicCloud.H"
+#include "SandBedHistory.H"
 #include "PstreamBuffers.H"
 #include "processorPolyPatch.H"
 #include "globalMeshData.H"
@@ -21,14 +22,26 @@ class SandKinematicCloud : public basicKinematicCloud
     // Only needed during a single injection/tracking step; restart state stays
     // in the native cloud. Dead parcel keys are never dereferenced.
     std::unordered_map<const basicKinematicParcel*, scalar> birthFraction_;
+    std::unordered_map<const basicKinematicParcel*, scalar> releaseFraction_;
+    autoPtr<SandBedHistory> bedHistory_;
 public:
     using basicKinematicCloud::basicKinematicCloud;
     typedef basicKinematicParcel ParticleType;
 
+    void enableBedHistory(bool initializeOnRestart)
+    { bedHistory_.reset(new SandBedHistory(this->mesh(),initializeOnRestart)); }
+    SandBedHistory& bedHistory() { return bedHistory_(); }
+    void scheduleRelease(ParticleType& parcel,scalar fraction)
+    { releaseFraction_[&parcel]=fraction; }
     void preEvolve()
     {
         birthFraction_.clear();
-        for (ParticleType& p : *this) p.stepFraction()=0;
+        for (ParticleType& p : *this)
+        {
+            auto release=releaseFraction_.find(&p);
+            p.stepFraction()=release==releaseFraction_.end() ? 0 : release->second;
+        }
+        releaseFraction_.clear();
         basicKinematicCloud::preEvolve();
     }
     void checkParcelProperties(ParticleType& parcel, scalar dt, bool fullyDescribed)
@@ -202,6 +215,8 @@ public:
                 particleStream
                     << patchIndexTransferLists[i]
                     << particleTransferLists[i];
+                if (bedHistory_.valid())
+                    particleStream << bedHistory_->take(particleTransferLists[i]);
             }
         }
 
@@ -245,6 +260,11 @@ public:
                     typename ParticleType::iNew(pMesh())
                 );
 
+                if (bedHistory_.valid())
+                {
+                    dictionary incoming(particleStream);
+                    bedHistory_->receive(incoming);
+                }
                 label pI = 0;
 
                 for (ParticleType& newp : newParticles)

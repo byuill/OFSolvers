@@ -65,3 +65,24 @@ subModels
  stochasticCollisionModel none;
 }
 cloudFunctions {}
+
+// Optional fixed-bed re-entrainment; disabled preserves permanent sticking.
+resuspension
+{
+ enabled false;
+ bedPatches (bed); // These walls must use the stick interaction above.
+ thresholdModel Shields; // Shields, shearStress, or nearBedVelocity
+ criticalShields 0.05;
+ // criticalShearStress 0.1; // Pa, for shearStress
+ // criticalVelocity 0.2;   // m/s, for nearBedVelocity (bed owner cell)
+ releaseRate 1;           // 1/s; lambda = rate * max(ratio - 1, 0)^exponent
+ releaseExponent 1.5;
+ minimumRestTime 0.1;     // s after deposition before release is permitted
+ normalLaunchSpeed 0.02; // m/s into the water, along inward wall normal
+ launchShearFactor 0;    // additional normal speed = factor * local uStar
+ liftDiameters 2;        // inward displacement in particle diameters
+ liftHeight 0;           // m; positive value overrides liftDiameters
+ seed 67890;
+ writeEvents false;
+ initializeHistoryOnRestart false; // explicit opt-in when enabling on old results
+}

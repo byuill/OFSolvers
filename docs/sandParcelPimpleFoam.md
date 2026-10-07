@@ -22,6 +22,7 @@ source scripts/openfoam-env.sh
 ./Allwmake
 ./tutorials/sandParcelChannel/Allrun
 python tests/openfoam/validate_parcels.py
+python tests/openfoam/validate_resuspension.py
 ```
 
 `Allwmake` builds both sediment solvers. `Allrun` creates a fresh copy of the 3-D
@@ -187,8 +188,10 @@ selection, fixed-mesh MRF/fvOptions momentum terms, and U/p/phi fields. The carr
 is incompressible, with rho read dimensionally from `constant/transportProperties`;
 mu=rho*nu. The cloud must have `coupled false; transient yes;` and is evolved
 once after each PIMPLE time step. Sand does not alter flow, turbulence or density.
-Dense feeds, particle collisions, bed scour/resuspension and morphology are
-outside this dilute model. The tutorial uses `sphereDrag` and `gravity`; changing
+Dense feeds, particle collisions, erosion of an external bed reservoir and
+morphology are outside this dilute model. Optional resuspension reactivates
+previously deposited parcels on the fixed bed, as described below.
+The tutorial uses `sphereDrag` and `gravity`; changing
 forces changes trajectories and can invalidate the calculated settling estimate.
 
 A Rouse **injection** profile does not maintain an equilibrium concentration
@@ -207,8 +210,9 @@ The tutorial's native `localInteraction` policy is:
 - **upstream/downstream: escape** — particles leave the cloud and their mass is
   retained in cumulative escaped-mass statistics.
 
-Inspect or change these policies for the application. Deposited particles are
-not automatically resuspended. The solver reports mobile and deposited cloud
+Inspect or change these policies for the application. Resuspension is disabled
+by default, so deposited particles remain inactive. The solver reports mobile
+and deposited cloud
 mass; native cloud output reports injected and escaped mass. Use the balance
 `injected = mobile + deposited + escaped` for the supplied no-collision example.
 
@@ -221,6 +225,113 @@ these cloud files and uniform metadata. Missing injector history at a nonzero
 time after feed start is explicitly rejected. Keep feed schedule, rate, diameter,
 seed and geometry unchanged across a restart. Native stochastic dispersion's RNG
 is separate: exact turbulent realizations are not claimed reproducible on restart.
+
+## Optional bed resuspension
+
+Enable the top-level `resuspension` dictionary in
+`constant/sandCloudProperties`. Select walls whose parcel interaction is `stick`:
+
+```foam
+resuspension
+{
+    enabled true;
+    bedPatches (bed);
+    thresholdModel Shields;
+    criticalShields 0.05;
+    releaseRate 1;             // K, per second
+    releaseExponent 1.5;       // n
+    minimumRestTime 0.1;       // seconds after deposition
+    normalLaunchSpeed 0.02;    // m/s into the fluid
+    launchShearFactor 0;       // additional launch speed = factor*uStar
+    liftDiameters 2;           // initial inward displacement = 2*d
+    liftHeight 0;              // positive metres overrides liftDiameters
+    seed 67890;
+    writeEvents false;         // true logs individual release times and IDs
+    initializeHistoryOnRestart false;
+}
+```
+
+The stress is evaluated **at each resting parcel's bed face**, using the current
+carrier solution and `devReff` from the selected laminar/RANS/LES turbulence
+model. Its tangential traction magnitude gives `tau_b = rhoFluid*kinematicShear`.
+Wall functions, near-wall resolution and the carrier closure therefore affect
+entrainment. Choose one threshold:
+
+| thresholdModel | Required setting | Ratio R that controls release |
+| --- | --- | --- |
+| `Shields` | `criticalShields` (default 0.05) | `tau_b / [(rhoParticle-rhoFluid)*|g|*d*criticalShields]` |
+| `shearStress` | `criticalShearStress`, Pa | `tau_b / criticalShearStress` |
+| `nearBedVelocity` | `criticalVelocity`, m/s | `|tangential bed-owner-cell U| / criticalVelocity` |
+
+For the tutorial's 0.125-mm quartz in freshwater, `criticalShields 0.05`
+corresponds to about **0.101 Pa**. The velocity option samples the adjacent cell
+centre, so its threshold is explicitly mesh dependent. It is not the no-slip
+wall velocity. Thresholds and release/launch coefficients need calibration for
+the intended sediment and bed conditions; this is an empirical entrainment
+process, rather than a resolved contact-force model.
+
+Once the minimum rest time has elapsed, the model uses
+
+```
+lambda = releaseRate * max(R - 1, 0)^releaseExponent
+P(release during dt at constant lambda) = 1 - exp(-lambda*dt)
+```
+
+There is no release at or below the threshold. A deterministic exponential
+waiting threshold is drawn once per deposition episode using the seed and native
+particle ID. The integrated hazard accumulates during eligible intervals and
+pauses below threshold. Its crossing gives the release time within the carrier
+step. Subdividing a constant-rate interval preserves that sampled time; changing
+time steps can still change the hydrodynamics and the deposition time. Newly
+detected contacts are dated at the **end of the cloud step**, so residence timing
+has that time-step resolution. No release is attempted again within that same
+step after redeposition.
+
+Release reactivates the **same computational parcel**. Its diameter, density,
+`nParticle`, mass and native ID are preserved. The initial tangential velocity is
+the bed-owner-cell carrier velocity, while the inward normal launch speed is
+`normalLaunchSpeed + launchShearFactor*uStar`. The parcel is relocated inward
+with fresh native tetrahedral addressing, then tracked only for the time
+remaining after release. Gravity, drag and optional native turbulent dispersion
+continue to act normally. The inward lift must be positive and less than half
+the bed-face-to-owner-cell-centre normal distance; excessive displacement fails
+explicitly. A parcel that returns to a sticking bed starts another residence
+episode. Release acts on whole weighted parcels; increasing parcelsPerSecond
+reduces sampling noise without altering the total feed.
+
+The model adds no bed material. It can resuspend only the deposited particles
+already in this cloud. The log reports release count, released mass and
+**cumulative released mass**, which includes repeated releases of the same
+parcel. Native `stick` statistics likewise count repeated deposition contacts.
+Neither cumulative quantity is the current bed inventory. Use `Sand inventory`
+and cumulative escaped mass for `injected = mobile + deposited + escaped`.
+
+When enabled, residence times, episode counters, sampled thresholds, integrated
+hazards and cumulative release statistics are saved in
+`<time>/uniform/lagrangian/sandCloud/sandResuspensionState`, alongside the usual
+cloud restart files. History follows the particle during MPI transfers. Keep
+the complete time directory, the same fixed mesh and decomposition, and the same
+resuspension settings for reproducible restart. Missing history is rejected.
+To **first enable the process on older results** that lack this file, explicitly
+set `initializeHistoryOnRestart true`; existing selected-wall deposits are then
+assigned a new residence starting at the restart time. This cannot recover their
+earlier contact times. Return that setting to false for subsequent restarts.
+When disabled or omitted, no resuspension history is read or written.
+
+For a fresh enabled run without changing the supplied tutorial:
+
+```bash
+case_dir=$(mktemp -d /tmp/sand-resuspension-XXXXXX)
+cp -a tutorials/sandParcelChannel/. "$case_dir/"
+foamDictionary "$case_dir/constant/sandCloudProperties" \
+    -entry resuspension.enabled -set true
+blockMesh -case "$case_dir" > "$case_dir/log.blockMesh" 2>&1
+sandParcelPimpleFoam -case "$case_dir" > "$case_dir/log.solver" 2>&1
+```
+
+The supplied flow may stay below the default threshold. Choose physically
+justified thresholds and inspect `maxThresholdRatio` in the log; a value above
+one permits stochastic release after the minimum rest time.
 
 Low parcel rates accumulate mass until a parcel is due; a final partial batch
 is flushed at the end of duration, including durations shorter than one parcel
@@ -253,9 +364,13 @@ wrapper is specific to the inspected v1912 APIs and fixed meshes.
 - `SandTransectInjection.H`: runtime-selected native injection submodel;
   transect clipping, local shear, settling, profile quadrature and sampling.
 - `SandKinematicCloud.H`: first-step tracking correction and native MPI transfer.
+- `SandResuspension.H`: optional local threshold, waiting-time and launch model.
+- `SandBedHistory.H`: restartable bed history transported with native parcel IDs.
 - `Make/files`, `Make/options`: OpenFOAM build target and libraries.
 - `tutorials/sandParcelChannel`: complete 3-D feed example.
 - `tests/openfoam/validate_parcels.py`: real executable integration checks.
+- `tests/openfoam/validate_resuspension.py`: release, residence, conservation,
+  restart, velocity/stress thresholds, time-step and MPI checks.
 
 Hydrodynamic UEqn/pEqn/createFields are reused from the sibling fixed-mesh solver,
 which was adapted from OpenCFD v1912 pimpleFoam. The code is GPL-3.0-or-later;
@@ -273,13 +388,21 @@ ranks; kEpsilon with stochasticDispersionRAS; retained deposited mass; invalid
 strip rejection; and missing restart-state rejection. The five original Python
 tests also passed, and the documented build and tutorial commands ran successfully.
 
-The final one-second tutorial injected **1e-4 kg**, with **6.79e-5 kg mobile** and
+The default one-second tutorial injected **1e-4 kg**, with **6.79e-5 kg mobile** and
 **3.21e-5 kg deposited**, conserving the feed mass. The separate outlet/MPI test
 accounted for mobile, deposited and escaped mass. These are implementation checks,
 not experimental calibration or a grid-convergence study.
 
-This instance's final test console log is
-`/workspace/ofsolvers-validation/parcel-tests-final.log`; detailed test artifacts
-are `/tmp/sand-parcel-validation-i2xdzly5`. Re-running the suite creates and prints
-a fresh directory. The executable is
+The additional resuspension suite checks disabled-process equivalence,
+subcritical stress and minimum residence, repeated release/redeposition without
+mass or ID changes, continuous versus restarted trajectories, equivalent Shields
+and dimensional-stress thresholds, constant-flow velocity thresholds and
+exponential waiting statistics, time-step subdivision and partial-step tracking,
+MPI history transfer/restart, and rejection of missing history or excessive lift.
+
+This instance's test console logs are
+`/workspace/ofsolvers-validation/parcel-tests-resuspension.log` and
+`/workspace/ofsolvers-validation/resuspension-tests.log`. Re-running either suite
+creates and prints a fresh directory containing cases, cloud fields and logs.
+The executable is
 `/workspace/ofsolvers-build/bin/sandParcelPimpleFoam`.

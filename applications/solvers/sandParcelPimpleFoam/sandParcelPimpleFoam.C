@@ -10,6 +10,7 @@
 #include "fvOptions.H"
 #include "SandKinematicCloud.H"
 #include "SandTransectInjection.H"
+#include "SandResuspension.H"
 
 // Register our new injector in the existing v1912 kinematic-cloud table.
 makeInjectionModelType(SandTransectInjection, basicKinematicCloud);
@@ -45,6 +46,7 @@ int main(int argc, char *argv[])
     SandKinematicCloud sandCloud("sandCloud", rho, U, mu, g);
     if (sandCloud.solution().coupled() || !sandCloud.solution().transient())
         FatalErrorInFunction << "sandCloud requires coupled false; transient yes" << exit(FatalError);
+    SandResuspension resuspension(sandCloud,turbulence());
     #include "createTimeControls.H"
     #include "CourantNo.H"
     #include "setInitialDeltaT.H"
@@ -71,7 +73,9 @@ int main(int argc, char *argv[])
             }
         }
         mu = rho*laminarTransport.nu();
+        resuspension.beforeEvolve();
         sandCloud.evolve();
+        resuspension.afterEvolve();
         // Native cloud statistics include suspended, escaped and stuck mass.
         // Stick leaves inactive parcels in the cloud, preserving their mass.
         scalar mobileMass=0, depositedMass=0;
@@ -87,6 +91,7 @@ int main(int argc, char *argv[])
         Info<< "Sand inventory: mobile=" << mobileMass << " deposited="
             << depositedMass << " kg" << endl;
         runTime.write();
+        resuspension.write();
         runTime.printExecutionTime(Info);
     }
     Info<< "End\n" << endl;
