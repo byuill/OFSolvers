@@ -1,0 +1,67 @@
+FoamFile
+{
+ version 2.0; format ascii; class dictionary; object sandCloudProperties;
+}
+solution
+{
+ active true;
+ coupled false;
+ transient yes;
+ cellValueSourceCorrection off;
+ maxCo 0.3;
+ interpolationSchemes { rho cell; U cellPoint; mu cell; }
+ integrationSchemes { U analytical; }
+ sourceTerms { schemes {} }
+}
+constantProperties { rho0 2650; }
+subModels
+{
+ particleForces { sphereDrag; gravity; }
+ injectionModels
+ {
+  feed
+  {
+   type sandTransectInjection;
+   // kg/s across the entire strip (NOT kg/s per metre).
+   massFeedRate 0.0001;
+   parcelsPerSecond 1000;
+   SOI 0;
+   duration 1;
+   d50 1.25e-4;
+   patch upstream;
+   // Origin is at the bed, centred across the strip, on the inlet plane.
+   origin (0 0.05 0);
+   widthDirection (0 1 0);
+   width 0.04;
+   depth 0.1;
+   referenceHeight 0.005;
+   maximumHeight 0.095;
+   inwardOffset 1e-7;
+   profile Rouse; // uniform = random uniform positions within this rectangle
+   profileBins 256;
+   shearVelocityModel localBed; // alternatively constant with uStar 0.02
+   bedPatch bed;
+   shearSampleLength 0.2;
+   kappa 0.41;
+   beta 1;
+   fluxWeighted true;
+   initialVelocity equilibrium; // carrier or carrier + terminal downward slip
+   seed 12345;
+   writeSamples false;
+  }
+ }
+ dispersionModel none;
+ patchInteractionModel localInteraction;
+ localInteractionCoeffs
+ {
+  patches
+  (
+   bed { type stick; }
+   "lid|sides" { type rebound; e 1; mu 0; }
+   "upstream|downstream" { type escape; }
+  );
+ }
+ surfaceFilmModel none;
+ stochasticCollisionModel none;
+}
+cloudFunctions {}

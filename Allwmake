@@ -10,3 +10,4 @@ if [ "${WM_PROJECT_VERSION:-}" != v1912 ] && [ "${WM_PROJECT_VERSION:-}" != 1912
     exit 1
 fi
 wmake applications/solvers/sedimentPimpleFoam
+wmake applications/solvers/sandParcelPimpleFoam
