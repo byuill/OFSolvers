@@ -73,10 +73,16 @@ where backups are retained.
 ### Pixel wizard banner
 
 The top of the workbench includes an original 1980s-style pixel wizard walking
-past a forest, a red Corps-style three-tower castle and a snowy mountain. He
-performs one trick per crossing, cycling through a spread-eagle hop, staff flame,
-an **ESSAYONS!** speech balloon, a breakdance arm wave, a stumble, a pipe smoke
-ring and a lightning spell. He reverses direction at each edge.
+past a forest, a red Corps-style three-tower castle and a snowy mountain. About
+30% of crossings are uninterrupted walks; on the others he performs one random
+trick. Tricks do not follow a fixed sequence, and consecutive performances use
+different tricks. He reverses direction at each edge.
+
+His eleven tricks include a spread-eagle hop, staff flame, an **ESSAYONS!** speech
+balloon, a breakdance arm wave, a stumble, a pipe smoke ring, a lightning spell,
+blowing a whistle as a dog runs past, a sneeze, a full cartwheel, and a
+**Models are magic** thought bubble. The banner has its own random generator
+and does not change simulation random seeds.
 
 Use **Pause wizard / Resume wizard** in the banner to freeze or resume the scene.
 The toolbar's **Wizard banner** toggle hides it to reclaim workspace. Animation
@@ -84,11 +90,12 @@ stops while hidden or paused and freezes while the window is minimized. It uses
 Qt pixel drawing with a cached background and needs no image downloads or extra
 packages. These controls remain available while a model runs.
 
-![Pixel wizard with ESSAYONS! balloon, forest, red castle and snowy mountain](docs/images/wizard-banner.png)
+![Pixel wizard thinking Models are magic beside the forest, red castle and snowy mountain](docs/images/wizard-banner.png)
 
-[Watch/download the 65-second MP4 preview](docs/images/wizard-preview.mp4) ·
-[Looping GIF preview](docs/images/wizard-preview.gif). Both show all seven tricks
-using the GUI's animation code and normal timing at a 960-pixel banner width.
+[Watch/download the MP4 preview](docs/images/wizard-preview.mp4) ·
+[Looping GIF preview](docs/images/wizard-preview.gif). This reproducible random
+sample shows all eleven tricks and three quiet crossings, using the GUI's
+animation code and normal timing at a 960-pixel banner width (about two minutes).
 
 ### Design a synthetic river case
 

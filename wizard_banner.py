@@ -1,10 +1,11 @@
 """Small, original pixel-art interlude, painted locally with Qt (no assets/network).
 
 The scene is drawn on a low-resolution image and enlarged by an integer factor.
-Animation uses elapsed time, with exactly one scheduled trick per crossing.
+Animation uses elapsed time, with a random trick or an uninterrupted crossing.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
+import random
 import time
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer
@@ -12,8 +13,10 @@ from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPolygon
 from PyQt6.QtWidgets import QPushButton, QWidget
 
 
-TRICKS = ('hop', 'flame', 'speech', 'breakdance', 'stumble', 'pipe', 'lightning')
-DURATIONS = (1.25, 1.8, 2.3, 2.1, 1.5, 2.9, 1.9)
+TRICKS = ('hop', 'flame', 'speech', 'breakdance', 'stumble', 'pipe', 'lightning',
+          'whistle', 'sneeze', 'cartwheel', 'thought')
+DURATIONS = (1.25, 1.8, 2.3, 2.1, 1.5, 2.9, 1.9, 4.2, 1.8, 2.4, 3.)
+TRICK_DURATIONS = dict(zip(TRICKS, DURATIONS))
 SCALE = 3
 SCENE_HEIGHT = 56
 GROUND = 51
@@ -21,29 +24,44 @@ GROUND = 51
 
 @dataclass
 class WizardMotion:
-    """A crossing pauses once at its midpoint, then completes and reverses."""
+    """Choose once per crossing; about 30% simply walk through the midpoint.
+
+    A private generator leaves simulation/random-injection seeds untouched.
+    Inject a seeded generator for reproducible animation tests or recordings.
+    """
     progress: float = 0.
     pass_number: int = 0
     phase: str = 'walk'
     trick_elapsed: float = 0.
     performed: bool = False
     elapsed: float = 0.
+    trick_probability: float = .7
+    rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
+    trick: str | None = field(init=False, default=None)
+    _previous_trick: str | None = field(init=False, default=None, repr=False)
+
+    def __post_init__(self):
+        if not math.isfinite(self.trick_probability) or not 0 <= self.trick_probability <= 1:
+            raise ValueError('Trick probability must lie between zero and one.')
+        self._choose_trick()
+
+    def _choose_trick(self):
+        self.trick = None
+        if self.rng.random() < self.trick_probability:
+            self.trick = self.rng.choice([name for name in TRICKS if name != self._previous_trick])
+            self._previous_trick = self.trick
 
     @property
     def direction(self):
         return 1 if self.pass_number % 2 == 0 else -1
 
     @property
-    def trick(self):
-        return TRICKS[self.pass_number % len(TRICKS)]
-
-    @property
     def duration(self):
-        return DURATIONS[self.pass_number % len(TRICKS)]
+        return TRICK_DURATIONS.get(self.trick, 0.)
 
     @property
     def trick_fraction(self):
-        return min(1., self.trick_elapsed/self.duration)
+        return min(1., self.trick_elapsed/self.duration) if self.duration else 0.
 
     def advance(self, seconds, width):
         if not math.isfinite(seconds) or seconds < 0:
@@ -60,19 +78,21 @@ class WizardMotion:
                     self.phase = 'walk'
                     self.performed = True
                 continue
-            target = 1. if self.performed else .5
+            target = .5 if self.trick is not None and not self.performed else 1.
             step = min(remaining, max(0., (target-self.progress)*travel/38.))
             self.progress = min(target, self.progress+step*38./travel)
             remaining -= step
             if self.progress >= target-1e-10:
                 self.progress = target
-                if not self.performed:
+                if self.trick is not None and not self.performed:
                     self.phase = 'trick'
                     self.trick_elapsed = 0.
                 else:
                     self.pass_number += 1
                     self.progress = 0.
                     self.performed = False
+                    self.trick_elapsed = 0.
+                    self._choose_trick()
 
     def x(self, width):
         fraction = self.progress if self.direction == 1 else 1-self.progress
@@ -104,8 +124,8 @@ class WizardBanner(QWidget):
         self.setFixedHeight(SCALE*SCENE_HEIGHT)
         self.setMinimumWidth(320)
         self.setAccessibleName('Pixel wizard landscape')
-        self.setAccessibleDescription('A wizard crosses a forest, red castle and snowy mountain, performing one trick each pass.')
-        self.setToolTip('One trick per crossing: hop, staff flame, ESSAYONS!, arm wave, stumble, pipe smoke ring, lightning.')
+        self.setAccessibleDescription('A wizard crosses a forest, red castle and snowy mountain. Some passes are quiet; others feature a random trick, a dog or a thought bubble.')
+        self.setToolTip('Random tricks with occasional quiet walks: hop, flame, ESSAYONS!, arm wave, stumble, smoke ring, lightning, whistle and dog, sneeze, cartwheel, or “Models are magic”.')
         self.motion = WizardMotion()
         self.paused = False
         self._background = None
@@ -276,21 +296,64 @@ LETTERS = {
     'Y': ('10001','10001','01010','00100','00100','00100','00100'),
     'O': ('01110','10001','10001','10001','10001','10001','01110'),
     'N': ('10001','11001','11001','10101','10011','10011','10001'),
+    'C': ('01111','10000','10000','10000','10000','10000','01111'),
+    'H': ('10001','10001','10001','11111','10001','10001','10001'),
+    'M': ('10001','11011','10101','10101','10001','10001','10001'),
+    'o': ('00000','00000','01110','10001','10001','10001','01110'),
+    'd': ('00001','00001','01101','10011','10001','10011','01101'),
+    'e': ('00000','00000','01110','10001','11111','10000','01111'),
+    'l': ('01100','00100','00100','00100','00100','00100','01110'),
+    's': ('00000','00000','01111','10000','01110','00001','11110'),
+    'a': ('00000','00000','01110','00001','01111','10001','01111'),
+    'r': ('00000','00000','10110','11001','10000','10000','10000'),
+    'm': ('00000','00000','11010','10101','10101','10101','10101'),
+    'g': ('00000','00000','01111','10001','01111','00001','01110'),
+    'i': ('00100','00000','01100','00100','00100','00100','01110'),
+    'c': ('00000','00000','01111','10000','10000','10000','01111'),
     '!': ('00100','00100','00100','00100','00100','00000','00100'),
 }
 
 
-def speech(painter, x, width):
-    left = max(2, min(width-63, x-30))
-    rectangle(painter, '#101b31', left, 2, 62, 16)
-    rectangle(painter, '#fff3ce', left+1, 3, 60, 14)
-    polygon(painter, '#101b31', [(x-3, 17), (x+3, 17), (x+1, 22)])
-    polygon(painter, '#fff3ce', [(x-2, 16), (x+2, 16), (x+1, 20)])
-    for i, letter in enumerate('ESSAYONS!'):
+def pixel_text(painter, text, x, y):
+    for i, letter in enumerate(text):
+        if letter == ' ':
+            continue
         for row, pixels in enumerate(LETTERS[letter]):
             for col, pixel in enumerate(pixels):
                 if pixel == '1':
-                    rectangle(painter, '#25334a', left+5+i*6+col, 6+row, 1, 1)
+                    rectangle(painter, '#25334a', x+i*6+col, y+row, 1, 1)
+
+
+def speech(painter, x, width, text='ESSAYONS!'):
+    size = len(text)*6+9
+    left = max(2, min(width-size-2, x-size//2))
+    rectangle(painter, '#101b31', left, 2, size, 16)
+    rectangle(painter, '#fff3ce', left+1, 3, size-2, 14)
+    polygon(painter, '#101b31', [(x-3, 17), (x+3, 17), (x+1, 22)])
+    polygon(painter, '#fff3ce', [(x-2, 16), (x+2, 16), (x+1, 20)])
+    pixel_text(painter, text, left+5, 6)
+
+
+def ellipse(painter, color, x, y, width, height):
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(QRect(round(x), round(y), round(width), round(height)))
+
+
+def thought(painter, x, width, direction):
+    size = 103
+    left = max(1, min(width-size-1, x-size//2))
+    # Union of outlined scallops; small separate circles make this a thought.
+    for inset, color in ((0, '#101b31'), (1, '#fff3ce')):
+        rectangle(painter, color, left+5, 2+inset, size-10, 13-2*inset)
+        for dx, y, w, h in ((0,3,15,12), (12,0,22,16), (31,1,24,15),
+                            (52,0,24,16), (73,1,23,15), (88,3,15,12)):
+            ellipse(painter, color, left+dx+inset, y+inset, w-2*inset, h-2*inset)
+    pixel_text(painter, 'Models are magic', left+4, 5)
+    ellipse(painter, '#101b31', x-direction*19-3, 17, 6, 5)
+    ellipse(painter, '#fff3ce', x-direction*19-2, 18, 4, 3)
+    ellipse(painter, '#101b31', x-direction*13-2, 22, 4, 4)
+    ellipse(painter, '#fff3ce', x-direction*13-1, 23, 2, 2)
 
 
 def draw_staff(p, x=12):
@@ -302,21 +365,73 @@ def draw_staff(p, x=12):
     rectangle(p, '#dcfff0', x, -31, 1, 3)
 
 
+def draw_dog(p, x, direction, elapsed):
+    """A floppy-eared pixel dog gallops across the path after the whistle."""
+    gait = int(elapsed*12) % 4
+    stride = (5, 1, -5, -1)[gait]
+    rectangle(p, '#414d47', x-12, GROUND+1, 30, 2)
+    p.save()
+    try:
+        p.translate(round(x), GROUND-(gait % 2))
+        p.scale(direction, 1)
+        # Far and near legs alternate extension, with dark paws.
+        for hip, step, color in ((-7,-stride,'#795447'), (7,stride,'#795447'),
+                                 (-8,stride,'#c28b54'), (8,-stride,'#e9b876')):
+            line(p, color, [(hip,-7),(hip+step//2,-3),(hip+step,0)], 3)
+            rectangle(p, '#493f3b', hip+step, -1, 4, 2)
+        line(p, '#bb824e', [(-11,-10),(-17,-14-gait % 2),(-20,-12-gait % 2)], 3)
+        rectangle(p, '#f0d2a0', -21, -14-gait % 2, 3, 3)
+        polygon(p, '#795447', [(-12,-13),(7,-13),(13,-9),(12,-5),(-10,-5)])
+        polygon(p, '#c28b54', [(-11,-12),(7,-12),(12,-9),(10,-6),(-10,-6)])
+        rectangle(p, '#e9b876', -7, -7, 16, 2)
+        rectangle(p, '#c28b54', 7, -18, 10, 10)
+        rectangle(p, '#f0d2a0', 14, -13, 8, 5)
+        rectangle(p, '#795447', 7, -18, 4, 10)
+        rectangle(p, '#211d2b', 15, -16, 1, 2)
+        rectangle(p, '#211d2b', 21, -13, 2, 3)
+        rectangle(p, '#ee8b87', 19, -8, 3, 2)
+        rectangle(p, '#4eb9c4', 9, -9, 3, 4)
+        rectangle(p, '#f1cc77', 10, -5, 2, 2)
+    finally:
+        p.restore()
+
+
 def draw_wizard(p, motion, width):
     active = motion.trick if motion.phase == 'trick' else None
     t = motion.trick_fraction if active else 0.
     x = motion.x(width)
     foot = GROUND-round(8*math.sin(math.pi*t)) if active == 'hop' else GROUND
     stride = (0, 2, 0, -2)[int(motion.elapsed*8) % 4] if not active else 0
-    spread = active == 'hop' and .18 < t < .85
+    spread = (active == 'hop' and .18 < t < .85) or active == 'cartwheel'
     rectangle(p, '#414d47', x-9, GROUND, 19, 2)
+    if active == 'cartwheel':
+        # Leave the staff planted beside the tumbling wizard.
+        p.save()
+        p.translate(x-motion.direction*33, GROUND)
+        p.scale(motion.direction, 1)
+        draw_staff(p, 0)
+        p.restore()
     p.save()
     try:
-        p.translate(x, foot)
-        p.scale(motion.direction, 1)
+        if active == 'cartwheel':
+            angle = 360*t
+            radians = math.radians(angle)
+            extent = 19*(abs(math.sin(radians))+abs(math.cos(radians)))
+            p.translate(x, GROUND-extent)
+            p.scale(motion.direction, 1)
+            p.rotate(angle)
+            p.translate(0, 17)
+        else:
+            p.translate(x, foot)
+            p.scale(motion.direction, 1)
         if active == 'stumble':
             # A forward lurch, flailing arms, then a small backward recovery.
             p.rotate(27*math.sin(2*math.pi*t)*math.sin(math.pi*t))
+        if active == 'sneeze':
+            if t < .35:
+                p.rotate(-8*math.sin(t/.35*math.pi/2))
+            elif t < .7:
+                p.rotate(17*math.sin((t-.35)/.35*math.pi))
         if active == 'breakdance':
             p.translate(0, -round(abs(math.sin(t*math.pi*4))))
 
@@ -332,7 +447,9 @@ def draw_wizard(p, motion, width):
             rectangle(p, '#8e7366', -6-stride, -2, 4, 1)
             rectangle(p, '#8e7366', 3+stride, -2, 4, 1)
 
-        if active == 'breakdance':
+        if active == 'cartwheel':
+            arms = ([(-5,-15),(-11,-25),(-14,-34)], [(5,-15),(11,-25),(14,-34)])
+        elif active == 'breakdance':
             wave = int(t*8) % 4
             arms = (
                 ([(-5,-14),(-11,-19),(-17,-19)], [(5,-14),(11,-10),(17,-10)]),
@@ -346,8 +463,10 @@ def draw_wizard(p, motion, width):
             arms = ([(-5,-15),(-10,-23),(-14,-24)], [(5,-15),(11,-20),(16,-23)])
         elif active == 'lightning':
             arms = ([(-5,-15),(-10,-21),(-8,-27)], [(5,-15),(10,-20),(12,-24)])
-        elif active == 'pipe':
+        elif active in ('pipe','whistle'):
             arms = ([(-5,-15),(-8,-9),(-3,-10)], [(5,-15),(10,-13),(9,-20)])
+        elif active == 'sneeze':
+            arms = ([(-5,-15),(0,-18),(7,-20)], [(5,-15),(10,-16),(10,-21)])
         else:
             arms = ([(-5,-15),(-9,-9-stride),(-7,-7-stride)], [(5,-15),(10,-12),(12,-17)])
         for points in arms:
@@ -368,6 +487,9 @@ def draw_wizard(p, motion, width):
         rectangle(p, '#ffdb9c', 5, -20, 3, 3)
         rectangle(p, '#252540', 4, -22, 1, 2)
         rectangle(p, '#f6f2d5', 3, -22, 1, 1)
+        if active == 'sneeze' and .3 < t < .75:
+            rectangle(p, '#efbd88', 3, -22, 3, 2)
+            rectangle(p, '#252540', 3, -21, 3, 1)
         polygon(p, '#7c8da4', [(-5,-19),(-1,-17),(6,-18),(6,-12),(1,-7),(-4,-12)])
         polygon(p, '#d2dcd6', [(-4,-19),(0,-17),(5,-18),(5,-13),(1,-9),(-2,-12)])
         line(p, '#fcf6de', [(-3,-17),(-2,-13),(0,-11)], 1)
@@ -382,8 +504,9 @@ def draw_wizard(p, motion, width):
         rectangle(p, '#3b3b78', -5, -26, 10, 2)
         rectangle(p, '#e9c778', 1, -26, 2, 2)
         rectangle(p, '#f5dfa0', -1, -30, 1, 1)
-        staff_x = -15 if active == 'pipe' else (20 if active == 'breakdance' or spread else 12)
-        draw_staff(p, staff_x)
+        if active != 'cartwheel':
+            staff_x = -15 if active in ('pipe','whistle','sneeze') else (20 if active == 'breakdance' or spread else 12)
+            draw_staff(p, staff_x)
 
         if active == 'flame' and .1 < t < .95:
             length = round(44*min(1., (t-.1)*6, (.95-t)*8))
@@ -420,7 +543,34 @@ def draw_wizard(p, motion, width):
         elif active == 'stumble' and .15 < t < .8:
             rectangle(p, '#e9d3a0', -14, -1, 3, 1)
             rectangle(p, '#af9e81', -18, -3, 2, 1)
+        elif active == 'whistle':
+            line(p, '#6c8c9f', [(11,-17),(12,-10),(8,-8)], 1)
+            rectangle(p, '#394a61', 7, -21, 9, 5)
+            rectangle(p, '#d7e5dd', 8, -20, 7, 3)
+            rectangle(p, '#718f9e', 12, -20, 2, 1)
+            if .08 < t < .38:
+                for dx, dy in ((20,-25),(28,-29)):
+                    line(p, '#f1cc77', [(dx,dy+3),(dx,dy-2),(dx+3,dy-1)], 1)
+                    rectangle(p, '#f1cc77', dx-2, dy+3, 3, 2)
+        elif active == 'sneeze':
+            rectangle(p, '#9ecdd0', 7, -22, 7, 6)
+            rectangle(p, '#edf4de', 8, -22, 6, 4)
+            line(p, '#b4d9d6', [(9,-21),(12,-18),(14,-19)], 1)
+            if .35 < t < .72:
+                burst = (t-.35)/.37
+                for distance, dy in ((10,-5),(16,0),(12,5)):
+                    rectangle(p, '#d7e5dd', 14+distance*burst, -20+dy*burst, 2, 1)
     finally:
         p.restore()
     if active == 'speech':
         speech(p, x, width)
+    elif active == 'thought':
+        thought(p, x, width, motion.direction)
+    elif active == 'sneeze' and .35 < t < .72:
+        speech(p, x, width, 'ACHOO!')
+    elif active == 'whistle' and .18 < t < .94:
+        crossing = (t-.18)/.76
+        dog_x = -24+crossing*(width+48)
+        if motion.direction == -1:
+            dog_x = width-dog_x
+        draw_dog(p, dog_x, motion.direction, motion.trick_elapsed)
