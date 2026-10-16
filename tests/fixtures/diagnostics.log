@@ -1,0 +1,29 @@
+# Illustrative v1912-format diagnostic samples; not a validation simulation.
+Starting time loop
+Courant Number mean: 0.1 max: 0.2
+deltaT = 0.01
+Time = 0.01
+smoothSolver: Solving for Ux, Initial residual = 0.01, Final residual = 1e-09, No Iterations 3
+PCG: Solving for p, Initial residual = 0.02, Final residual = 2e-10, No Iterations 6
+smoothSolver: Solving for C, Initial residual = 0.004, Final residual = 1e-12, No Iterations 4
+time step continuity errors : sum local = 1e-10, global = -2e-12, cumulative = -2e-12
+Sediment budget: suspended=0.1 bed=0.02 externalOut=0.001 residual=2e-14 kg; min(C)=0
+ExecutionTime = 1 s  ClockTime = 1 s
+Courant Number mean: 0.2 max: 0.4
+deltaT = 0.01
+Time = 0.02
+smoothSolver: Solving for Ux, Initial residual = 0.005, Final residual = 1e-10, No Iterations 3
+PCG: Solving for p, Initial residual = 0.01, Final residual = 1e-10, No Iterations 5
+smoothSolver: Solving for C, Initial residual = 0.002, Final residual = 1e-12, No Iterations 4
+Sediment budget: suspended=0.09999 bed=0.02 externalOut=0.001 residual=-1e-14 kg; min(C)=0
+ExecutionTime = 2 s  ClockTime = 3 s
+Courant Number mean: 0.3 max: 3.2
+deltaT = 0.00001
+Time = 0.02001
+smoothSolver: Solving for Ux, Initial residual = 0.2, Final residual = 0.001, No Iterations 1000
+PCG: Solving for p, Initial residual = 0.3, Final residual = 0.01, No Iterations 1000
+smoothSolver: Solving for C, Initial residual = 0.5, Final residual = 0.002, No Iterations 1000
+Sediment budget: suspended=0.10199 bed=0.02 externalOut=0.001 residual=0.002 kg; min(C)=-0.01
+ExecutionTime = 5 s  ClockTime = 8 s
+End
+--- Finished (exit code 0) ---

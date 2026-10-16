@@ -1,7 +1,12 @@
-# River preprocessing GUI
+# River preprocessing and run QAQC GUI
 
 [Getting started](getting-started.md) · [Concentration solver](sedimentPimpleFoam.md) ·
 [Particle solver](sandParcelPimpleFoam.md)
+
+Start with the [GUI README](../GUI_README.md) for installation, the workflow
+sidebar, persistent command logs, run-setting snapshots and numerical
+diagnostics. The instructions below provide the detailed case-setup workflow;
+numbered stages are selected from the left sidebar.
 
 The desktop GUI prepares OpenFOAM case dictionaries, initial conditions and
 boundary conditions. The **River Sediment** tab supports both custom solvers.
@@ -83,9 +88,11 @@ Activate **OpenCFD v1912** before launching the GUI to use the sediment solvers.
    repeats file checks and `checkMesh`. Mesh success requires the native
    `Mesh OK.` result, not just an exit code.
 
-The GUI console displays output but does not create persistent solver log files.
-Save/copy console output if needed, or use the terminal `Allrun` workflows for
-on-disk logs. Numerical time directories are written according to `controlDict`.
+Every GUI command retains complete output in `logs/<UTC-operation-id>/console.log`
+and captures numerical/material dictionaries in `settings.json` before launch.
+Use **9. Run diagnostics** for live/saved-log histories, comparison and error
+context. Numerical time directories are written according to `controlDict`;
+use ParaView for actual flow/sediment field visualization.
 
 ## Suspended concentration and finite bed inventory
 
