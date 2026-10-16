@@ -16,8 +16,8 @@ BUDGET = re.compile(r'Sediment budget:\s*suspended=('+NUMBER+r')\s+bed=('+NUMBER
 INVENTORY = re.compile(r'Sand inventory:\s*mobile=('+NUMBER+r')\s+deposited=('+NUMBER+r')\s+kg', re.I)
 CONTINUITY = re.compile(r'continuity errors.*?global\s*=\s*('+NUMBER+r'),\s*cumulative\s*=\s*('+NUMBER+r')', re.I)
 EXECUTION = re.compile(r'ExecutionTime\s*=\s*('+NUMBER+r')\s*s\s+ClockTime\s*=\s*('+NUMBER+r')\s*s', re.I)
-FATAL = re.compile(r'FOAM FATAL|floating point exception|segmentation fault|MPI_ABORT|\bSIGFPE\b|(?:^|\]\s*|\d+:\s*)ERROR:|error while loading shared libraries', re.I)
-WARNING = re.compile(r'FOAM Warning|^\s*bounding\s|maximum number of iterations|not converg', re.I)
+FATAL = re.compile(r'FOAM FATAL|floating point exception|segmentation fault|MPI_ABORT|\bSIGFPE\b|(?:^|\]\s*|\d+:\s*)ERROR:|error while loading shared libraries|Failed\s+[1-9]\d*\s+mesh checks', re.I)
+WARNING = re.compile(r'FOAM Warning|^\s*bounding\s|^\s*\*\*\*|maximum number of iterations|not converg', re.I)
 
 
 @dataclass
@@ -227,8 +227,8 @@ class RunDiagnostics:
         if not co:
             result.append(Finding('Info', 'Water Courant number was not logged', 'No recognized water-Courant entries.', 'Enable the appropriate solver diagnostics; no Courant value is inferred from residuals.'))
         if not self.values('sediment_co_max'):
-            result.append(Finding('Info', 'Sediment Courant number was not logged', 'The supplied concentration solver limits settling CFL internally but does not print it.',
-                'Review maxSedimentCo in constant/sedimentProperties and settling speed. Water Co alone does not include settling.'))
+            result.append(Finding('Info', 'Sediment Courant number was not logged', 'No recognized settling-inclusive Courant entries; older solver builds may omit them.',
+                'Use the rebuilt concentration solver to log sediment Courant numbers. Review maxSedimentCo and settling speed; water Co alone does not include settling.'))
         if self.values('mobile_kg'):
             result.append(Finding('Info', 'Parcel inventories are available; closure is not inferred', 'Mobile and deposited mass are plotted in kg.',
                 'A complete balance also needs injected and escaped mass, restart inventory and resuspended transfers. A changing inventory by itself is not conservation error.'))

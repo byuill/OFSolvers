@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import json
 
 from foam_io import boundary_patches, entries, scalar, value
 
@@ -65,6 +66,16 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     for folder in ('constant', 'system'):
         if not (case/folder).is_dir():
             result.errors.append(f'Missing directory: {folder}/')
+    if (case/'river-design.json').is_file():
+        try:
+            river=json.loads((case/'river-design.json').read_text())
+            if river.get('tool')!='ofsolvers-river-design':raise ValueError('Unrecognized river design report.')
+            if not river.get('mesh_checked'):
+                result.errors.append('Run the designed river mesh pipeline and native meshQuality/topology checks first.')
+            if river['design']['channel']['mode']=='fixed' and not river.get('boundaries_ready'):
+                result.errors.append('Finalize water, RANS and sediment boundaries from the actual river mesh patches.')
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            result.errors.append('River design: '+str(exc))
     for name in ('controlDict', 'fvSchemes', 'fvSolution'):
         if not (case/'system'/name).is_file():
             result.errors.append(f'Missing system/{name}.')
@@ -73,6 +84,11 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     try:
         control = (case/'system/controlDict').read_text(encoding='utf-8')
         application = value(control, 'application')
+        if (case/'river-design.json').is_file():
+            river=json.loads((case/'river-design.json').read_text())
+            hydrograph=river['design']['hydraulic'].get('hydrograph',[])
+            if hydrograph and scalar(control,'endTime')>hydrograph[-1][0]:
+                result.errors.append('endTime exceeds the river hydrograph coverage. Extend its Q/C table before running.')
         if application != solver:
             result.errors.append(f'Case application is {application}; selected solver is {solver}.')
         result.time_directory = start_directory(case, control)

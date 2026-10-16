@@ -17,6 +17,7 @@ that README as well.
 | Component | What you can do | Guide |
 | --- | --- | --- |
 | River preprocessing GUI | Prepare geometry/terrain and mesh inputs, edit actual patch boundaries, configure turbulence and sediment cases | [GUI README](GUI_README.md), [detailed setup guide](docs/gui-user-guide.md) |
+| Synthetic river designer | Generate channel/obstacle STLs, graded block/snappy meshes, rough-wall checks and discharge/sediment boundary plans | [River design workflow](docs/river-design.md) |
 | Execution and QAQC | Check case files and native mesh quality, run serial/MPI jobs, preserve command logs and numerical settings | [GUI run workflow](GUI_README.md#execution-logs-and-run-settings) |
 | Run diagnostics | Plot linear residuals, Courant numbers, time-step/cost histories and sediment budgets; compare logs and inspect error context | [Diagnostics and interpretation](GUI_README.md#run-diagnostics) |
 | `sedimentPimpleFoam` | Eulerian suspended concentration, settling and conservative exchange with a finite bed inventory | [Concentration solver](docs/sedimentPimpleFoam.md), [example](tutorials/sedimentChannel) |
@@ -83,6 +84,8 @@ require the activated, built OpenFOAM environment.
 
 - [GUI entry point](main.py), [window/navigation](main_window.py),
   [GUI README](GUI_README.md).
+- [River geometry and engineering checks](river_design.py), [case exporter](river_case.py),
+  [design interface](river_design_tab.py), [native validation](tests/openfoam/validate_river_design.py).
 - [Log parser and QAQC checks](run_diagnostics.py),
   [diagnostics interface](diagnostics_tab.py), [execution worker](execution_tab.py).
 - [Solver sources](applications/solvers), [tutorials](tutorials),

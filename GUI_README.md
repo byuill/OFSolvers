@@ -1,6 +1,7 @@
 # OFSolvers GUI — river setup and numerical QAQC
 
 [Repository home](README.md) · [Detailed case setup](docs/gui-user-guide.md) ·
+[Synthetic river designer](docs/river-design.md) ·
 [Solver installation](docs/getting-started.md) ·
 [Concentration solver](docs/sedimentPimpleFoam.md) · [Sand parcels](docs/sandParcelPimpleFoam.md)
 
@@ -54,7 +55,7 @@ outside the source checkout. The left sidebar follows the case workflow:
 | Stage | Purpose |
 | --- | --- |
 | 1. Conceptualization | Domain size/resolution, boundary plan, times, Courant time-step and Froude estimates |
-| 2. Geometry Preprocessing | Import, transform and export geometry for meshing |
+| 2. Geometry Preprocessing | Design synthetic river terrain, obstacles, rough-wall meshes and boundaries; import/transform existing geometry |
 | 3. Terrain Processor | Convert projected terrain rasters to local model surfaces |
 | 4. Mesh Generation | Background mesh and snappyHexMesh dictionaries, geometry inspection |
 | 5. Boundary Conditions | Edit water-flow boundaries using actual mesh patch names |
@@ -69,7 +70,22 @@ solver**, **Run diagnostics** and **GUI guide**. `Ctrl+O` opens a case;
 solver. The detailed setup guide explains which files each editor writes and
 where backups are retained.
 
-### First runnable sediment case
+### Design a synthetic river case
+
+In **Geometry Preprocessing → Synthetic river, mesh and boundaries**, define a
+trapezoidal/rectangular channel, wall spacing and roughness, discharge/sediment
+plan, and optional piers, rigid stems, boulders, bedforms or bank structures.
+**Preview and analyze** shows design geometry and hydraulic/mesh review messages.
+Create the case in an empty active folder, then **Build river mesh and run native
+quality checks**. Successful fixed-domain meshing applies water, RANS and sediment
+boundaries using the actual patches. A failed native check stops readiness.
+
+Use **Export STL files…** for geometry alone. VOF mode exports water/air meshing
+inputs for a separately completed native free-surface case. The
+[river-design guide](docs/river-design.md) explains grading, mesh acceptance,
+estimated versus measured y+, Q/C hydrographs, parcel feeds and model limits.
+
+### First runnable tutorial sediment case
 
 1. Select a new, empty case folder.
 2. Open **River Sediment**, choose `sedimentPimpleFoam` or
@@ -148,7 +164,7 @@ re-enable the checkbox to receive output from subsequent active-command updates.
 | Initial/final residual for a selected field | Every linear solve is retained, including repeated PIMPLE corrections at the same time; not a nonlinear or physical-accuracy certificate |
 | Water Courant number | Solver-reported mean/max; review against your stability target and chosen schemes |
 | Interface Courant number | Kept separate from water Co when a native free-surface solver logs it |
-| Sediment Courant number | Shown only if the log prints a recognized entry; the supplied concentration solver limits settling CFL internally but does not print it |
+| Sediment Courant number | Rebuilt concentration solver logs settling-inclusive mean/max after flow correction; older builds may omit it |
 | `deltaT` | Printed time-step values; no missing value is inferred from mesh size or residuals |
 | Wall time per step | Difference between successive `ClockTime` values in the same run segment; the first difference is unavailable and clock rounding can yield zero |
 | Sediment step-budget residual | The concentration solver's discrete **per-step** residual in kg; not a cumulative loss or an outlet rate |
@@ -158,7 +174,8 @@ re-enable the checkbox to receive output from subsequent active-command updates.
 | Cumulative continuity | Solver-reported flow-continuity diagnostic; not sediment mass or an inferred volumetric-flow error |
 
 The parser follows the supplied v1912 log format, pairing pre-step Co/deltaT
-with the following `Time` record. Repeated/backward times and recognized run
+with the following `Time` record; post-flow sediment Co belongs to the current
+step. Repeated/backward times and recognized run
 headers begin separate segments; plots do not connect restart histories across
 those segments. Time is seconds for the transient sediment solvers; native
 steady solvers may use iteration-like `Time` values.

@@ -38,7 +38,10 @@ int main(int argc, char *argv[])
         phiSed = phi + (Ws & mesh.Sf());
         forAll(mesh.boundary(), patchi)
         {
-            if (isA<wallPolyPatch>(mesh.boundaryMesh()[patchi]))
+            const word patchType(mesh.boundaryMesh()[patchi].type());
+            if (isA<wallPolyPatch>(mesh.boundaryMesh()[patchi])
+             || patchType == "symmetry" || patchType == "symmetryPlane"
+             || patchType == "empty")
                 phiSed.boundaryFieldRef()[patchi] = 0;
         }
         scalar sedimentRate = 0.5*gMax

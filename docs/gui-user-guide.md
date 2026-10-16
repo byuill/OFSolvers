@@ -8,6 +8,11 @@ sidebar, persistent command logs, run-setting snapshots and numerical
 diagnostics. The instructions below provide the detailed case-setup workflow;
 numbered stages are selected from the left sidebar.
 
+For channels designed from scratch, use the integrated
+[synthetic river designer](river-design.md): terrain/obstacle STL creation,
+graded blockMesh or snappyHexMesh, near-wall checks and river flow/sediment plans.
+The tutorial workflow below remains available for existing starter cases.
+
 The desktop GUI prepares OpenFOAM case dictionaries, initial conditions and
 boundary conditions. The **River Sediment** tab supports both custom solvers.
 Execution uses the OpenFOAM installation on the machine running the GUI.

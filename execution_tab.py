@@ -6,6 +6,8 @@ import json
 import math
 from datetime import datetime, timezone
 import uuid
+import shutil
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -73,7 +75,7 @@ class OpenFOAMWorker(QThread):
                 for relative in ('system/controlDict', 'system/fvSolution', 'system/fvSchemes',
                                  'system/decomposeParDict', 'constant/sedimentProperties',
                                  'constant/transportProperties', 'constant/turbulenceProperties',
-                                 'constant/sandCloudProperties'):
+                                 'constant/sandCloudProperties','river-design.json','river-boundary-plan.json'):
                     path = Path(self.cwd)/relative
                     if path.is_file():
                         settings['files'][relative] = path.read_text(encoding='utf-8', errors='replace')
@@ -127,6 +129,7 @@ class OpenFOAMWorker(QThread):
 class ExecutionTab(QWidget):
     busy_changed = pyqtSignal(bool)
     diagnostics_updated = pyqtSignal(object)
+    river_mesh_finished = pyqtSignal(bool)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case_dir = ''
@@ -136,6 +139,8 @@ class ExecutionTab(QWidget):
         self.current_report = RunDiagnostics()
         self.log_path = None
         self._live_co_peak = None
+        self._river_queue = []
+        self._river_active = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -172,6 +177,8 @@ class ExecutionTab(QWidget):
         self.btn_qaqc.clicked.connect(self.run_qaqc)
         self.btn_mesh = QPushButton('Generate initial mesh (blockMesh)')
         self.btn_mesh.clicked.connect(self.run_block_mesh)
+        self.btn_river_mesh = QPushButton('Build designed river mesh (block / snappy + quality checks)')
+        self.btn_river_mesh.clicked.connect(self.run_river_mesh)
         self.btn_decompose = QPushButton('Write decomposition and run decomposePar')
         self.btn_decompose.setToolTip('Backs up the old dictionary; writes simple decomposition along the selected axis.')
         self.btn_decompose.clicked.connect(self.run_decompose)
@@ -179,7 +186,7 @@ class ExecutionTab(QWidget):
         self.btn_run.clicked.connect(self.run_solver)
         self.btn_reconstruct = QPushButton('Reconstruct latest results')
         self.btn_reconstruct.clicked.connect(self.run_reconstruct)
-        for button in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run, self.btn_reconstruct):
+        for button in (self.btn_mesh, self.btn_river_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run, self.btn_reconstruct):
             layout.addWidget(button)
         self.status_label = QLabel('Not checked')
         layout.addWidget(self.status_label)
@@ -215,7 +222,7 @@ class ExecutionTab(QWidget):
         self.console.ensureCursorVisible()
 
     def toggle_ui_state(self, running):
-        for control in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run,
+        for control in (self.btn_mesh, self.btn_river_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run,
                         self.btn_reconstruct, self.combo_solver, self.spin_cores, self.decompose_axis):
             control.setEnabled(not running)
         self.btn_stop.setEnabled(running)
@@ -277,16 +284,20 @@ class ExecutionTab(QWidget):
                 + (f' | Peak water Co: {self._live_co_peak:.4g}' if self._live_co_peak is not None else '')
                 + (f' | Latest Δt: {step.delta_t:.4g} s' if step.delta_t is not None else ''))
         self.diagnostics_updated.emit(self.current_report)
-        if self._operation in ('qaqc', 'before_solver'):
+        if self._operation in ('qaqc', 'before_solver', 'river_check'):
             self._output.append(line)
 
     def on_process_finished(self, code):
         cancelled = self.worker.cancelled
         self._success = not cancelled and code == 0
-        if self._operation in ('qaqc', 'before_solver'):
+        if self._operation in ('qaqc', 'before_solver', 'river_check'):
             self._success = not cancelled and mesh_passed('\n'.join(self._output), code)
             self.status_label.setText('Case checks and checkMesh passed.' if self._success
                                       else 'Mesh check failed or was cancelled; solver was not started.')
+            if self._operation=='river_check' or (Path(self.case_dir)/'river-design.json').is_file():
+                regions=re.findall(r'Number of regions:\s*(\d+)', '\n'.join(self._output))
+                if not regions or any(int(count)!=1 for count in regions):self._success=False
+                self.status_label.setText('River mesh native quality checks passed.' if self._success else 'River mesh failed native quality/connectivity checks.')
         elif self._operation == 'solver':
             self.status_label.setText('Solver completed.' if self._success else 'Solver failed or was cancelled.')
 
@@ -297,6 +308,23 @@ class ExecutionTab(QWidget):
         self._operation = None
         self.toggle_ui_state(False)
         worker.deleteLater()
+        if self._river_active:
+            if self._success and worker.command[0]=='snappyHexMesh':
+                try:
+                    from river_case import prepare_mesh_check
+                    prepare_mesh_check(self.case_dir)
+                    self.append_log('Set final rigid-lid patch constraint after snapping.')
+                except (OSError,ValueError,TypeError,KeyError) as exc:
+                    self.append_log('Cannot prepare final river mesh constraints: '+str(exc));self._success=False
+            if not self._success:
+                self._river_queue=[];self._river_active=False
+                self.river_mesh_finished.emit(False)
+            elif self._river_queue:
+                self._next_river_command()
+            else:
+                self._river_active=False
+                self.river_mesh_finished.emit(True)
+            return
         if operation == 'before_solver' and self._success:
             solver = self.combo_solver.currentText()
             ranks = self.spin_cores.value()
@@ -312,7 +340,10 @@ class ExecutionTab(QWidget):
     def run_qaqc(self):
         if self._preflight(parallel=True):
             self.status_label.setText('Case file checks passed; checking the mesh...')
-            self.execute_command(['checkMesh'], 'qaqc')
+            self.execute_command(self.mesh_check_command(), 'qaqc')
+
+    def mesh_check_command(self):
+        return ['checkMesh','-allTopology','-meshQuality'] if (Path(self.case_dir)/'river-design.json').is_file() else ['checkMesh']
 
     def run_block_mesh(self):
         if not self.case_dir or not (Path(self.case_dir)/'system/blockMeshDict').exists():
@@ -323,11 +354,32 @@ class ExecutionTab(QWidget):
             return
         self.execute_command(['blockMesh'], 'mesh')
 
+    def run_river_mesh(self):
+        from river_case import mesh_commands
+        if self.worker is not None:return
+        try:
+            commands=mesh_commands(self.case_dir)
+            missing=[command[0] for command in commands if shutil.which(command[0]) is None]
+            if missing:raise ValueError('Activate OpenFOAM before meshing; missing tools: '+', '.join(missing))
+            self._river_queue=commands
+            self._river_active=True
+            self._next_river_command()
+        except (OSError,ValueError,TypeError,KeyError) as exc:
+            self._river_active=False;self._river_queue=[]
+            self.append_log('River meshing: '+str(exc))
+            self.status_label.setText('River mesh was not started.')
+
+    def _next_river_command(self):
+        command=self._river_queue.pop(0)
+        if not self.execute_command(command,'river_check' if command[0]=='checkMesh' else 'river_mesh'):
+            self._river_queue=[];self._river_active=False
+            self.river_mesh_finished.emit(False)
+
     def run_solver(self):
         # Always recheck files and mesh; a previous PASS can become stale.
         if self._preflight(parallel=True):
             self.status_label.setText('Checking the mesh before starting the solver...')
-            self.execute_command(['checkMesh'], 'before_solver')
+            self.execute_command(self.mesh_check_command(), 'before_solver')
 
     def run_decompose(self):
         if self.worker is not None or not self._preflight():

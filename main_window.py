@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         self.tab_diagnostics = DiagnosticsTab()
         self.tabs.addTab(self.tab_diagnostics, '9. Run diagnostics')
         self.tab_execution.diagnostics_updated.connect(self.tab_diagnostics.receive_live)
+        self.tab_geometry.river_design.case_exported.connect(self._on_starter_prepared)
+        self.tab_geometry.river_design.mesh_requested.connect(self._build_river_mesh)
+        self.tab_execution.river_mesh_finished.connect(self.tab_geometry.river_design.mesh_completed)
         self._setup_navigation()
         self._setup_toolbar()
         self._apply_style()
@@ -181,7 +184,7 @@ class MainWindow(QMainWindow):
     def _stage_changed(self, index):
         descriptions = [
             'Plan the domain, time controls and hydraulic regime. Saving the plan does not start a simulation.',
-            'Prepare channel and structure geometry for mesh generation.',
+            'Design synthetic river terrain, wall spacing, obstacles and hydraulic boundaries, or prepare imported geometry.',
             'Convert projected terrain data into local model geometry; check units and vertical reference.',
             'Create the background mesh and snappyHexMesh inputs, then inspect mesh quality.',
             'Set water-flow boundaries using the actual mesh patch names.',
@@ -232,6 +235,10 @@ class MainWindow(QMainWindow):
     def _run_from_toolbar(self):
         self.tabs.setCurrentWidget(self.tab_execution)
         self.tab_execution.run_solver()
+
+    def _build_river_mesh(self):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.run_river_mesh()
 
     def show_gui_guide(self):
         dialog = QDialog(self)
@@ -557,10 +564,18 @@ class MainWindow(QMainWindow):
             raise ValueError('Case folder does not exist.')
         self.case_dir = str(folder)
         self.case_dir_edit.setText(self.case_dir)
-        for tab in (self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
+        for tab in (self.tab_geometry, self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
                     self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_diagnostics):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
+        if (folder/'river-design.json').is_file():
+            try:
+                from river_case import load_river_case
+                river,design=load_river_case(folder)
+                if river.get('boundaries_ready'):
+                    self.sim_combo.setCurrentText('RAS')
+                    self.tab_turbulence.model_combo.setCurrentText(design.hydraulic.turbulence)
+            except (OSError,ValueError,KeyError,TypeError):pass
         self.case_hint.setText('Active case: '+folder.name+' · Use Run diagnostics to review logs; open saved flow/parcel fields in ParaView.')
         control = folder/'system/controlDict'
         if control.exists():
@@ -603,5 +618,6 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.tab_mesh.plotter.close()
+        self.tab_geometry.river_design.plotter.close()
         self.tab_diagnostics.timer.stop()
         event.accept()

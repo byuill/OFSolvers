@@ -13,11 +13,12 @@ never change. The C++ code separates `createSediment.H` (properties/fields) and
 ## Installation inspected and parent selection
 
 The cloud runtime is Debian's **OpenFOAM.com/OpenCFD v1912**, package
-`1912.200626-3+b1`; matching Debian source is `1912.200626-3`, including its GCC
-compatibility patches. It is not OpenFOAM Foundation or foam-extend. OFSolvers
+`1912.200626-3+b1`; the matching upstream source release is `v1912.200626`.
+It is not OpenFOAM Foundation or foam-extend. OFSolvers
 originally contained a PyQt GUI, with no C++ solver or OpenFOAM development headers.
 
-The matching source tree is `/workspace/openfoam-source/openfoam-1912.200626`.
+The current prepared source tree is
+`/workspace/ofsolvers-native/source/openfoam-OpenFOAM-v1912.200626`.
 Relevant reused interfaces:
 
 | Source in the OpenFOAM tree | Purpose |
@@ -60,12 +61,12 @@ summing bed mass.
 For a normal v1912 installation, source its `etc/bashrc` and use `./Allwmake`
 instead of the cloud-specific activation script. Compilation requires the
 matching source headers, generated `lnInclude` directories, wmake's build tools,
-and runtime libraries with DP/32-bit labels. The cloud preparation downloaded
-Debian source and build dependencies using APT's signed repository metadata,
-ran `wmakeLnIncludeAll`, built `wmake/src`, and linked the source tree's
-`platforms/linux64Gcc/lib` to `/workspace/ofsolvers-system/usr/lib`. It reused
-existing shared libraries rather than rebuilding OpenFOAM. These source and
-runtime directories must be retained together. For another version, adapt and
+and runtime libraries with DP/32-bit labels. The prepared environment retains
+the matching source, generated `lnInclude` headers and built wmake tools under
+`/workspace/ofsolvers-native`. Activation supplies the extracted Debian runtime
+libraries to both the runtime loader and compiler; it reuses those libraries
+rather than rebuilding OpenFOAM. These source, runtime and environment files
+must be retained together. For another version, adapt and
 revalidate the APIs; the build wrapper deliberately rejects untested versions.
 
 ## Configure your own case
@@ -172,7 +173,9 @@ Ds = nu/ScM + nut/ScT                [m²/s]
 Field dimensions: C `[1 -3 0 0 0 0 0]`, Mbed `[1 -2 0 0 0 0 0]`.
 `sedimentFlux` is the numerical **mass rate per face** [kg/s], positive outward
 at external boundaries. `phiSed` includes settling on open and coupled faces.
-On walls its normal flux is zero; active-bed settling is accounted for once,
+On walls, symmetry/symmetryPlane and empty constraints its normal flux is zero;
+this prevents artificial settling inflow through a rigid lid. Coupled faces
+retain their transfer. Active-bed settling is accounted for once,
 by the exchange condition below. Other walls are impermeable to sediment and
 must use `zeroGradient C`. Empty patches require `empty` fields.
 
@@ -182,6 +185,9 @@ same first-order physical time update. C is solved after the flow loop, once
 per step (with configurable nonorthogonal iterations), without under-relaxation.
 Fluid and sediment Courant limits control adaptive time stepping. With fixed
 time steps (`adjustTimeStep no`), the user is responsible for both CFL limits.
+The solver logs `Sediment Courant Number mean: ... max: ...` after flow
+correction, using the current settling-inclusive face flux. Rebuild older
+executables to obtain this diagnostic and closed symmetry-lid settling flux.
 Use accurate C solver tolerances; the printed budget residual measures algebraic
 and roundoff errors. Negative C/Mbed beyond numerical tolerance causes a fatal
 error; there is no mass-destroying concentration clipping. An erosion cap leaves

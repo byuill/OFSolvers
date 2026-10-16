@@ -21,6 +21,13 @@ if (gMin(Ds.primitiveField()) <= 0)
 phiSed = phi + (Ws & mesh.Sf());
 forAll(mesh.boundary(), patchi)
 {
+    const word patchType(mesh.boundaryMesh()[patchi].type());
+    if (patchType == "symmetry" || patchType == "symmetryPlane" || patchType == "empty")
+    {
+        // Settling must not inject sediment through a closed rigid lid or
+        // cross symmetry/2-D constraint faces. Keep coupled transfers intact.
+        phiSed.boundaryFieldRef()[patchi] = 0;
+    }
     if (isA<wallPolyPatch>(mesh.boundaryMesh()[patchi]))
     {
         // Wall settling is handled once, by the Robin diffusive flux below.
@@ -31,6 +38,16 @@ forAll(mesh.boundary(), patchi)
         if (!active && C.boundaryField()[patchi].type() != "zeroGradient")
             FatalErrorInFunction << "Inactive walls require zeroGradient C" << exit(FatalError);
     }
+}
+{
+    const scalarField sedimentFaceSum
+    (
+        fvc::surfaceSum(mag(phiSed))().primitiveField()
+    );
+    const scalar maximum = 0.5*dt*gMax(sedimentFaceSum/mesh.V());
+    const scalar mean = 0.5*dt*gSum(sedimentFaceSum)/gSum(mesh.V());
+    Info<< "Sediment Courant Number mean: " << mean
+        << " max: " << maximum << endl;
 }
 // Kinematic stress includes viscous and modeled turbulent stress. Remove
 // normal traction; only the tangential component drives bed entrainment.
