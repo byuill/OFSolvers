@@ -86,6 +86,10 @@ packages. These controls remain available while a model runs.
 
 ![Pixel wizard with ESSAYONS! balloon, forest, red castle and snowy mountain](docs/images/wizard-banner.png)
 
+[Watch/download the 65-second MP4 preview](docs/images/wizard-preview.mp4) ·
+[Looping GIF preview](docs/images/wizard-preview.gif). Both show all seven tricks
+using the GUI's animation code and normal timing at a 960-pixel banner width.
+
 ### Design a synthetic river case
 
 In **Geometry Preprocessing → Synthetic river, mesh and boundaries**, define a
