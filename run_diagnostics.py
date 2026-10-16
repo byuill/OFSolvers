@@ -16,7 +16,7 @@ BUDGET = re.compile(r'Sediment budget:\s*suspended=('+NUMBER+r')\s+bed=('+NUMBER
 INVENTORY = re.compile(r'Sand inventory:\s*mobile=('+NUMBER+r')\s+deposited=('+NUMBER+r')\s+kg', re.I)
 CONTINUITY = re.compile(r'continuity errors.*?global\s*=\s*('+NUMBER+r'),\s*cumulative\s*=\s*('+NUMBER+r')', re.I)
 EXECUTION = re.compile(r'ExecutionTime\s*=\s*('+NUMBER+r')\s*s\s+ClockTime\s*=\s*('+NUMBER+r')\s*s', re.I)
-FATAL = re.compile(r'FOAM FATAL|floating point exception|segmentation fault|MPI_ABORT|\bSIGFPE\b', re.I)
+FATAL = re.compile(r'FOAM FATAL|floating point exception|segmentation fault|MPI_ABORT|\bSIGFPE\b|(?:^|\]\s*|\d+:\s*)ERROR:|error while loading shared libraries', re.I)
 WARNING = re.compile(r'FOAM Warning|^\s*bounding\s|maximum number of iterations|not converg', re.I)
 
 

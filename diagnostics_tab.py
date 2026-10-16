@@ -42,6 +42,7 @@ class DiagnosticsTab(QWidget):
         self._generation = 0
         self._dirty = False
         self._summary_base = 'No diagnostic samples yet.'
+        self._last_live_report = None
         layout = QVBoxLayout(self)
         intro = QLabel('Review numerical stability, conservation and computational cost. '
                        'Accuracy still requires mesh/time-step refinement and comparison with observations.')
@@ -68,6 +69,7 @@ class DiagnosticsTab(QWidget):
         layout.addLayout(files)
         self.follow_live = QCheckBox('Follow the active command (updates every second)')
         self.follow_live.setChecked(True)
+        self.follow_live.toggled.connect(self._follow_changed)
         layout.addWidget(self.follow_live)
         self.source_label = QLabel('No log selected. Run a command or open an existing solver log.')
         self.source_label.setWordWrap(True)
@@ -159,6 +161,7 @@ class DiagnosticsTab(QWidget):
         self._generation += 1
         self.case_dir = path
         self.report, self.baseline = RunDiagnostics(), None
+        self._last_live_report = None
         self.follow_live.setChecked(True)
         self.refresh_logs()
         self.render_report()
@@ -218,6 +221,8 @@ class DiagnosticsTab(QWidget):
         if self.worker.purpose == 'baseline':
             self.baseline = report
         else:
+            if self.follow_live.isChecked() and self._last_live_report is not None:
+                return
             self.report = report
         self.render_report()
 
@@ -233,9 +238,15 @@ class DiagnosticsTab(QWidget):
         self.render_report()
 
     def receive_live(self, report):
+        self._last_live_report = report
         if self.follow_live.isChecked():
             self.report = report
             self._dirty = True
+
+    def _follow_changed(self, checked):
+        if checked and self._last_live_report is not None:
+            self.report = self._last_live_report
+            self.render_report()
 
     def refresh_live(self):
         if self._dirty and self.follow_live.isChecked() and self.isVisible():

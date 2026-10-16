@@ -132,6 +132,12 @@ def test_cancellation_is_distinct_from_success_even_if_process_exits_zero():
     assert any(item.title == 'Command was canceled' for item in report.findings())
 
 
+def test_missing_executable_error_is_available_in_debugging_context():
+    report = report_from('ERROR: Failed to execute command: No such file or directory: missingSolver\n--- Finished (exit code -1) ---')
+    assert any('missingSolver' in line for line in report.events)
+    assert any(item.level == 'Error' for item in report.findings())
+
+
 def test_worker_preserves_full_output_and_start_settings(qapp, tmp_path):
     from execution_tab import ExecutionTab
     from sediment_setup import create_starter
@@ -169,8 +175,11 @@ def test_diagnostics_widget_load_compare_and_live_controls(qapp, tmp_path):
     assert tab.baseline is None
     tab.follow_live.setChecked(False)
     original = tab.report
-    tab.receive_live(RunDiagnostics())
+    latest = RunDiagnostics(source='latest command log')
+    tab.receive_live(latest)
     assert tab.report is original
+    tab.follow_live.setChecked(True)
+    assert tab.report is latest
     tab.timer.stop()
     tab.close()
 
