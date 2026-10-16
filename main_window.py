@@ -39,6 +39,7 @@ from terrain_tab import TerrainTab
 from execution_tab import ExecutionTab
 from sediment_tab import SedimentTab
 from diagnostics_tab import DiagnosticsTab
+from wizard_banner import WizardBanner
 
 
 class MainWindow(QMainWindow):
@@ -46,13 +47,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('OFSolvers · River modeling workbench')
-        self.resize(1360, 900)
-        self.setMinimumSize(1000, 680)
+        self.resize(1360, 1000)
+        self.setMinimumSize(1000, 800)
 
         # Main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        self.wizard_banner = WizardBanner(self)
+        layout.addWidget(self.wizard_banner)
 
         self.case_dir = ''
         case_layout = QHBoxLayout()
@@ -227,6 +230,13 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         action('GUI guide', QStyle.StandardPixmap.SP_DialogHelpButton, self.show_gui_guide,
                QKeySequence.StandardKey.HelpContents)
+        toolbar.addSeparator()
+        self.wizard_action = QAction('Wizard banner', self)
+        self.wizard_action.setCheckable(True)
+        self.wizard_action.setChecked(True)
+        self.wizard_action.setToolTip('Show or hide the animated pixel wizard landscape')
+        self.wizard_action.toggled.connect(self.wizard_banner.setVisible)
+        toolbar.addAction(self.wizard_action)
 
     def _check_from_toolbar(self):
         self.tabs.setCurrentWidget(self.tab_execution)
@@ -620,4 +630,5 @@ class MainWindow(QMainWindow):
         self.tab_mesh.plotter.close()
         self.tab_geometry.river_design.plotter.close()
         self.tab_diagnostics.timer.stop()
+        self.wizard_banner.timer.stop()
         event.accept()

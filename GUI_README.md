@@ -70,6 +70,22 @@ solver**, **Run diagnostics** and **GUI guide**. `Ctrl+O` opens a case;
 solver. The detailed setup guide explains which files each editor writes and
 where backups are retained.
 
+### Pixel wizard banner
+
+The top of the workbench includes an original 1980s-style pixel wizard walking
+past a forest, a red Corps-style three-tower castle and a snowy mountain. He
+performs one trick per crossing, cycling through a spread-eagle hop, staff flame,
+an **ESSAYONS!** speech balloon, a breakdance arm wave, a stumble, a pipe smoke
+ring and a lightning spell. He reverses direction at each edge.
+
+Use **Pause wizard / Resume wizard** in the banner to freeze or resume the scene.
+The toolbar's **Wizard banner** toggle hides it to reclaim workspace. Animation
+stops while hidden or paused and freezes while the window is minimized. It uses
+Qt pixel drawing with a cached background and needs no image downloads or extra
+packages. These controls remain available while a model runs.
+
+![Pixel wizard with ESSAYONS! balloon, forest, red castle and snowy mountain](docs/images/wizard-banner.png)
+
 ### Design a synthetic river case
 
 In **Geometry Preprocessing → Synthetic river, mesh and boundaries**, define a
