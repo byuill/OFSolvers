@@ -30,6 +30,7 @@ from geometry_tab import GeometryTab
 from terrain_tab import TerrainTab
 from execution_tab import ExecutionTab
 from sediment_tab import SedimentTab
+from flume_tab import FlumeTab
 
 
 class MainWindow(QMainWindow):
@@ -98,6 +99,11 @@ class MainWindow(QMainWindow):
         self.solver_combo.currentTextChanged.connect(self.tab_sediment.set_solver)
         self.tab_sediment.solver_changed.connect(self._sync_execution_solver)
         self.tab_sediment.case_prepared.connect(self._on_starter_prepared)
+
+        self.tab_flume = FlumeTab()
+        self.tabs.addTab(self.tab_flume, "Castle flume")
+        self.tab_flume.case_prepared.connect(self._on_starter_prepared)
+        self.tab_flume.mesh_requested.connect(self._mesh_castle_flume)
 
         # Tab 8: Execution & Monitoring
         self.tab_execution = ExecutionTab()
@@ -407,7 +413,7 @@ class MainWindow(QMainWindow):
         self.case_dir = str(folder)
         self.case_dir_edit.setText(self.case_dir)
         for tab in (self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
-                    self.tab_execution, self.tab_terrain, self.tab_sediment):
+                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
         control = folder/'system/controlDict'
@@ -420,6 +426,27 @@ class MainWindow(QMainWindow):
                     spin.setValue(scalar(text, name))
             except (OSError, ValueError) as exc:
                 QMessageBox.warning(self, 'Case controls', f'Could not load all time controls: {exc}')
+
+        if self.tab_flume.mesh_button.isEnabled():
+            self.sim_combo.setCurrentText('RAS')
+            for spin, number in ((self.dim_x_spinbox,3), (self.dim_y_spinbox,.25),
+                                 (self.dim_z_spinbox,1), (self.cells_x_spinbox,120),
+                                 (self.cells_y_spinbox,10), (self.cells_z_spinbox,40)):
+                spin.setValue(number)
+            for name, combo in self.boundary_combos.items():
+                combo.setCurrentText('Inlet' if name == 'Min X' else 'Outlet' if name == 'Max X'
+                                     else 'Atmosphere/Open' if name == 'Max Z' and self.tab_flume.depth.currentText() == '0.5' else 'Wall')
+            for axis, extent, cells in [('X',3,120),('Y',.25,10),('Z',1,40)]:
+                self.tab_mesh.blockmesh_inputs[axis]['min'].setValue(0)
+                self.tab_mesh.blockmesh_inputs[axis]['max'].setValue(extent)
+                self.tab_mesh.blockmesh_inputs[axis]['cells'].setValue(cells)
+
+    def _mesh_castle_flume(self):
+        if not (Path(self.case_dir)/"flume.json").is_file():
+            QMessageBox.warning(self, "Castle flume", "Generate or select a castle flume case first.")
+            return
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.execute_command(["sh", "./Allmesh"], "castle_mesh")
 
     def _on_starter_prepared(self, path, solver):
         self.set_case_directory(path)

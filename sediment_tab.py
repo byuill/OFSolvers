@@ -149,6 +149,8 @@ class SedimentTab(QWidget):
         self.solver_changed.emit(name)
 
     def set_solver(self, name):
+        self.btn_write.setEnabled(name in TEMPLATES)
+        self.btn_starter.setEnabled(name in TEMPLATES)
         if name in TEMPLATES:
             self.model_combo.setCurrentText(name)
 
@@ -253,7 +255,7 @@ class SedimentTab(QWidget):
             solver = value((case/'system/controlDict').read_text(),'application')
             self.set_solver(solver)
             if solver not in TEMPLATES:
-                self.status.setText('Select a sediment starter or a complete sediment solver case.')
+                self.status.setText('Use the Castle flume controls for free-surface sediment cases.' if solver == 'sedimentInterFoam' else 'Select a sediment starter or a complete sediment solver case.')
                 return
             mappings = {}
             if solver == 'sedimentPimpleFoam':

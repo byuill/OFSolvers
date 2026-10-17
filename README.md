@@ -1,9 +1,9 @@
 # OFSolvers
 
-This repository includes two custom sediment-transport solvers built from
+This repository includes three custom sediment-transport solvers built from
 OpenFOAM's fixed-mesh PIMPLE flow equations, their example cases and user guides.
-The Python/PyQt river preprocessing GUI configures both sediment solvers,
-initial and boundary conditions, mesh dictionaries and case/mesh QAQC.
+The Python/PyQt river workbench configures sediment models, initial and boundary
+conditions, mesh dictionaries and case/mesh QAQC, including a free-surface flume.
 
 ## User guides
 
@@ -14,12 +14,17 @@ sediment controls and QAQC.
 
 | Solver | Choose it when you need | Guide | Example case |
 | --- | --- | --- | --- |
+| `sedimentInterFoam` | Moving water–air free surface with phase-weighted suspended sediment and finite bed exchange | [VOF sediment guide](docs/sedimentInterFoam.md) | [Castle flume generator](castle_flume.py) |
 | `sedimentPimpleFoam` | A suspended concentration field, settling and conservative exchange with a finite bed inventory | [Eulerian sediment guide](docs/sedimentPimpleFoam.md) | [sedimentChannel](tutorials/sedimentChannel) |
 | `sandParcelPimpleFoam` | Individual weighted sand-parcel trajectories, a uniform/Rouse inlet feed and optional threshold-based resuspension | [Lagrangian sand guide](docs/sandParcelPimpleFoam.md) | [sandParcelChannel](tutorials/sandParcelChannel) |
 
-Both solvers use one-way dilute sediment transport on a fixed bed. Their APIs
+The solvers use one-way dilute sediment transport on a fixed bed. Their APIs
 have been tested on **OpenFOAM.com/OpenCFD v1912**. The build script checks this
 version; other OpenFOAM releases and forks need adaptation and validation.
+
+The [Castle flume preset](docs/castle-flume.md) generates a 3 × 0.25 × 1 m
+flume with a centered, arched castle obstacle, sediment settings and local
+mesh refinement from the desktop workbench or `castle_flume.py`.
 
 ## Quick start in the prepared cloud environment
 
@@ -42,7 +47,7 @@ instructions in [Getting started](docs/getting-started.md).
 - [Tutorials](tutorials): complete runnable case dictionaries and initial fields.
 - [Executable integration checks](tests/openfoam): concentration, parcel and
   resuspension checks using the actual OpenFOAM solvers.
-- [Allwmake](Allwmake): builds both solvers after OpenFOAM activation.
+- [Allwmake](Allwmake): builds all three solvers after OpenFOAM activation.
 
 The guides, solver sources and tutorials are versioned together in this repository.
 Compiled executables are built locally; generated case results are separate from

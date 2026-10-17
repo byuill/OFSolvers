@@ -9,7 +9,8 @@ import shutil
 from foam_io import boundary_patches, entries, scalar, value
 
 SOLVERS = ('interFoam', 'multiphaseEulerFoam', 'buoyantBoussinesqPimpleFoam',
-           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam')
+           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'sedimentInterFoam')
+VOF_SOLVERS = {'interFoam','sedimentInterFoam'}
 PRESSURE_SOLVERS = {'pimpleFoam', 'simpleFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam'}
 
 
@@ -89,6 +90,10 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     if not any('Missing mesh file' in e for e in result.errors):
         try:
             patches = boundary_patches(case/'constant/polyMesh/boundary')
+            if (case/'flume.json').is_file() and not any(
+                p['name'] == 'castle' and p['type'] == 'wall' for p in patches
+            ):
+                result.errors.append('Castle flume mesh is missing its castle wall; run Allmesh, not only blockMesh.')
         except (OSError, ValueError) as exc:
             result.errors.append(f'Mesh boundary metadata: {exc}')
     fields = ['U']
@@ -96,12 +101,12 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     if solver in PRESSURE_SOLVERS:
         fields.append('p')
         properties += ['transportProperties', 'turbulenceProperties']
-    elif solver == 'interFoam':
+    elif solver in VOF_SOLVERS:
         fields += ['p_rgh', 'alpha.water']
         properties += ['transportProperties', 'turbulenceProperties', 'g']
     else:
         result.warnings.append(f'Model-specific fields for {solver} are not fully checked by this GUI.')
-    if solver == 'sedimentPimpleFoam':
+    if solver in ('sedimentPimpleFoam','sedimentInterFoam'):
         fields += ['C', 'Mbed']
         properties += ['sedimentProperties', 'g']
     if solver == 'sandParcelPimpleFoam':
@@ -136,6 +141,16 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                 continue
             try:
                 field_text = path.read_text()
+                if solver == 'sedimentInterFoam' and name == 'alpha.water' and (case/'flume.json').is_file():
+                    uniform = re.search(r'\binternalField\s+uniform\s+([^;]+);',field_text)
+                    if uniform and float(uniform[1]) == 0:
+                        result.errors.append('Initialize the half-depth water phase with setFields (or Allmesh) before solving.')
+                # setFields writes large cell lists. Preflight inspects dimensions
+                # and patches, not every internal value; avoid tokenizing millions
+                # of values on the GUI thread. The solver checks the full field.
+                field_text = re.sub(
+                    r'\binternalField\s+nonuniform\s+List<[^>]+>\s+\d+\s*\(.*?\)\s*;',
+                    'internalField uniform 0;', field_text, flags=re.S)
                 dimensions = {'U':[0,1,-1,0,0,0,0], 'p':[0,2,-2,0,0,0,0],
                     'p_rgh':[1,-1,-2,0,0,0,0], 'alpha.water':[0]*7,
                     'C':[1,-3,0,0,0,0,0], 'Mbed':[1,-2,0,0,0,0,0]}
@@ -225,7 +240,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
         if rank_times and len(set(rank_times)) == 1:
             result.time_directory = rank_times[0]
     if check_programs:
-        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam'):
+        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam','sedimentInterFoam'):
             version = os.environ.get('WM_PROJECT_VERSION','')
             if version and version not in ('1912','v1912'):
                 result.errors.append(f'The custom sediment solvers require OpenCFD v1912; active version is {version}.')

@@ -24,7 +24,7 @@ from PyQt6.QtCore import Qt
 
 from openfoam_dict_parser import OpenFoamDictParser
 from foam_io import boundary_patches, write_case_files, value, entries
-from case_qaqc import PRESSURE_SOLVERS
+from case_qaqc import PRESSURE_SOLVERS, VOF_SOLVERS
 
 
 class BoundaryTab(QWidget):
@@ -54,14 +54,14 @@ class BoundaryTab(QWidget):
 
     def set_solver_profile(self, solver_name):
         """Synchronizes boundary writer profile with global solver selection."""
-        supported = {'interFoam'} | PRESSURE_SOLVERS
+        supported = VOF_SOLVERS | PRESSURE_SOLVERS
         if self.solver_profile_combo.findText(solver_name) < 0:
             self.solver_profile_combo.addItem(solver_name)
         self.solver_profile_combo.setCurrentText(solver_name)
         self.btn_write_0.setEnabled(solver_name in supported)
         self.btn_write_0.setToolTip('Edits existing fluid fields only; advanced profiles require manual setup.'
                                   if solver_name not in supported else 'Writes only edited patches; keeps other entries unchanged.')
-        is_inter = solver_name == 'interFoam'
+        is_inter = solver_name in VOF_SOLVERS
         self.atm_pressure.setSuffix(' Pa gauge' if is_inter else ' m²/s² gauge')
         self.outlet_dwl.setSuffix(' Pa gauge' if is_inter else ' m²/s² gauge')
         self.inlet_mwl.setEnabled(is_inter)
@@ -462,7 +462,7 @@ class BoundaryTab(QWidget):
 
     def show_native_conditions(self, name):
         preview = []
-        fields = ['U','p_rgh','alpha.water'] if self.solver_profile_combo.currentText() == 'interFoam' else ['U','p']
+        fields = ['U','p_rgh','alpha.water'] if self.solver_profile_combo.currentText() in VOF_SOLVERS else ['U','p']
         for field in fields:
             try:
                 with open(os.path.join(self.case_dir,'0',field),encoding='utf-8') as stream:
@@ -560,9 +560,9 @@ class BoundaryTab(QWidget):
 
         try:
             profile = self.solver_profile_combo.currentText()
-            if profile not in ({'interFoam'} | PRESSURE_SOLVERS):
+            if profile not in (VOF_SOLVERS | PRESSURE_SOLVERS):
                 raise ValueError('This solver profile is not supported by the fluid boundary writer.')
-            if profile == "interFoam":
+            if profile in VOF_SOLVERS:
                 fields = ["U", "p_rgh", "alpha.water"]
             else:
                 fields = ["U", "p"]
@@ -600,7 +600,7 @@ class BoundaryTab(QWidget):
                     raise ValueError(f'Missing 0/{name}; start from a complete case template.')
             contents['0/U'] = u_parser.render({p: u_boundary[p] for p in targets}, merge=not rebuild)
 
-            if profile == "interFoam":
+            if profile in VOF_SOLVERS:
                 p_parser = OpenFoamDictParser(
                     os.path.join(self.case_dir, "0", "p_rgh"),
                     default_class="volScalarField",
@@ -648,7 +648,7 @@ class BoundaryTab(QWidget):
         alpha_boundary = {}
         warnings = []
 
-        is_interfoam = profile == "interFoam"
+        is_interfoam = profile in VOF_SOLVERS
 
         for i in range(self.patch_list.count()):
             item = self.patch_list.item(i)

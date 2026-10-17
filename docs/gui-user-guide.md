@@ -254,3 +254,9 @@ conservation, serial restart, two-rank parcel resuspension/restart/reconstructio
 generated block/snappy mesh dictionaries, and a native parcel run after rebuilding
 the flow and sediment conditions for a custom mesh. It prints the artifact directory.
 Xvfb is only needed for headless GUI testing; a normal desktop uses its display.
+
+## Castle flume preset
+
+Use the **Castle flume** tab to generate the arched castle flume into the selected
+empty case folder, then **Mesh castle flume and check mesh** before solving.
+See [geometry, sediment settings and free-surface/filled-flume models](castle-flume.md).
