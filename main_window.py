@@ -31,6 +31,7 @@ from terrain_tab import TerrainTab
 from execution_tab import ExecutionTab
 from sediment_tab import SedimentTab
 from flume_tab import FlumeTab
+from tracer_tab import TracerTab
 
 
 class MainWindow(QMainWindow):
@@ -104,6 +105,11 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_flume, "Castle flume")
         self.tab_flume.case_prepared.connect(self._on_starter_prepared)
         self.tab_flume.mesh_requested.connect(self._mesh_castle_flume)
+
+        self.tab_tracers = TracerTab()
+        self.tabs.addTab(self.tab_tracers, "Large tracers")
+        self.tab_tracers.case_prepared.connect(self._on_starter_prepared)
+        self.tab_tracers.command_requested.connect(self._run_tracer_command)
 
         # Tab 8: Execution & Monitoring
         self.tab_execution = ExecutionTab()
@@ -413,7 +419,7 @@ class MainWindow(QMainWindow):
         self.case_dir = str(folder)
         self.case_dir_edit.setText(self.case_dir)
         for tab in (self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
-                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume):
+                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume, self.tab_tracers):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
         control = folder/'system/controlDict'
@@ -447,6 +453,10 @@ class MainWindow(QMainWindow):
             return
         self.tabs.setCurrentWidget(self.tab_execution)
         self.tab_execution.execute_command(["sh", "./Allmesh"], "castle_mesh")
+
+    def _run_tracer_command(self, command, operation):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.execute_command(command, operation)
 
     def _on_starter_prepared(self, path, solver):
         self.set_case_directory(path)

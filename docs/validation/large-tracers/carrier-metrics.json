@@ -1,0 +1,12 @@
+{
+  "0": {
+    "water_volume_m3": 0.8214930594091614,
+    "max_water_cell_speed_m_s": 0.30000001192092896,
+    "cells": 6336
+  },
+  "3": {
+    "water_volume_m3": 0.8283596777307531,
+    "max_water_cell_speed_m_s": 0.48530858755111694,
+    "cells": 6336
+  }
+}

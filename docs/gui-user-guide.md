@@ -1,15 +1,22 @@
 # River preprocessing GUI
 
+The **Large tracers** tab seeds 1–999 physical spheres into a saved flow model,
+configures size/density distributions and contact, runs `largeTracerFoam`, and
+opens particle trajectories and an interactive replay. It includes a water/air
+scour-hole example with a moving free surface. Follow the
+[large tracer guide](largeTracerFoam.md) for its workflow and physics limits.
+
 [Getting started](getting-started.md) · [Concentration solver](sedimentPimpleFoam.md) ·
 [Particle solver](sandParcelPimpleFoam.md)
 
 The desktop GUI prepares OpenFOAM case dictionaries, initial conditions and
-boundary conditions. The **River Sediment** tab supports both custom solvers.
+boundary conditions. The **River Sediment** tab configures concentration and sand-parcel transport.
 Execution uses the OpenFOAM installation on the machine running the GUI.
-Both sediment solvers use a fixed water domain and fixed bed elevation with
-one-way dilute transport. They do not track a moving water surface or update
-river bathymetry. Use a complete water-domain mesh and physically appropriate
-water-flow boundary conditions.
+`sedimentPimpleFoam` and `sandParcelPimpleFoam` use a fixed water domain and
+fixed bed elevation with one-way dilute transport. The **Castle flume** preset
+uses `sedimentInterFoam` for a moving water/air surface at 0.5 m water depth.
+None of these solvers updates river bathymetry. Use a complete mesh and
+physically appropriate flow boundary conditions.
 
 ## Launch
 

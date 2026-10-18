@@ -1,0 +1,8 @@
+{
+  "particles": 25,
+  "mobilized": 25,
+  "currently_retained": 0,
+  "ever_left_region": 25,
+  "crossed_rim": 25,
+  "escaped": 8
+}
