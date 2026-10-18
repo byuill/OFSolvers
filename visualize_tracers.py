@@ -27,7 +27,13 @@ def load_tracks(run):
     if not np.isfinite(data).all():
         raise ValueError('Tracks contain missing or nonfinite particle states.')
     first = {int(r['id']):r for r in rows if r['time']==times[0]}
+    preview=False
+    if (run/'largeTracerProperties').is_file():
+        from foam_io import value
+        try: preview=value((run/'largeTracerProperties').read_text(encoding='utf-8'),'previewOnly') in ('true','yes','on','1')
+        except ValueError: pass
     return dict(times=np.array(times),ids=ids,data=data,
+        preview=preview,
         diameter=np.array([first[i]['diameter'] for i in ids]),
         density=np.array([first[i]['density'] for i in ids]),
         pair_eligible=([bool(first[i]['pair_contact_eligible']) for i in ids]
@@ -54,7 +60,9 @@ def plot_carrier(run, output):
     run, output = Path(run).resolve(), Path(output)
     case = run.parents[2]
     config = (run/'largeTracerProperties').read_text(encoding='utf-8')
-    time = float(value(config,'flowTime' if value(config,'frozenFlow')=='true' else 'endTime'))
+    try: preview=value(config,'previewOnly') in ('true','yes','on','1')
+    except ValueError: preview=False
+    time = float(value(config,'flowTime' if value(config,'frozenFlow')=='true' else 'startTime' if preview else 'endTime'))
     markers = sorted(case.glob('*.foam'))
     temporary = None
     if not markers:
@@ -142,7 +150,12 @@ def visualize(run, output=None):
         ax.add_patch(plt.Circle(data[last,i,[0,2]],tracks['diameter'][i]/2,
             facecolor=color,edgecolor='black',lw=.5,alpha=.8))
         ax.scatter(data[0,i,0],data[0,i,2],marker='+',s=18,color=color)
-        az.plot(t[:last+1],data[:last+1,i,2],color=color,lw=1)
+        if tracks['preview']:
+            az.add_patch(plt.Circle(data[0,i,[0,1]],tracks['diameter'][i]/2,
+                facecolor=color,edgecolor='black',lw=.5,alpha=.8))
+            az.plot(data[0,i,0],data[0,i,1],'+',color=color,markersize=3)
+        else:
+            az.plot(t[:last+1],data[:last+1,i,2],color=color,lw=1)
     if bed:
         points = np.array(bed)
         ax.fill_between(points[:,0],points[:,1],-.27,color='#b8a995',zorder=-2)
@@ -150,8 +163,12 @@ def visualize(run, output=None):
         ax.axhline(.5,color='#2584b0',ls=':',label='Initial water level')
         ax.set_xlim(0,3); ax.set_ylim(-.25,.75)
     ax.set_aspect('equal',adjustable='box')
-    ax.set(xlabel='x (m)',ylabel='z (m)',title='Paths projected onto x–z; all particle y positions')
-    az.set(xlabel='Time (s)',ylabel='Particle center elevation (m)',title='Rise and retention')
+    ax.set(xlabel='x (m)',ylabel='z (m)',title=('Initial placement' if tracks['preview'] else 'Paths')+' projected onto x–z; all particle y positions')
+    if tracks['preview']:
+        az.autoscale_view(); az.set_aspect('equal',adjustable='box')
+        az.set(xlabel='x (m)',ylabel='y (m)',title='Initial placement projected onto x–y')
+    else:
+        az.set(xlabel='Time (s)',ylabel='Particle center elevation (m)',title='Rise and retention')
     for a in (ax,az): a.grid(alpha=.2)
     fig.colorbar(plt.cm.ScalarMappable(norm=norm,cmap=cmap),ax=[ax,az],label='Particle density (kg/m³)',shrink=.65)
     final = data[-1]
@@ -159,7 +176,7 @@ def visualize(run, output=None):
         currently_retained=int(sum((final[:,10]>0) & (final[:,6]>0))),
         ever_left_region=int(sum(final[:,8])),crossed_rim=int(sum(final[:,9])),
         escaped=int(sum(final[:,6]==0)))
-    fig.suptitle(f"{run.name}: {counts['particles']} physical spheres | "
+    fig.suptitle(('Initial placement only — ' if tracks['preview'] else '')+f"{run.name}: {counts['particles']} physical spheres | "
         f"mobilized {counts['mobilized']} | left region {counts['ever_left_region']} | escaped {counts['escaped']}")
     fig.savefig(output/'trajectories.png',dpi=180,bbox_inches='tight')
     fig.savefig(output/'trajectories.svg',bbox_inches='tight')
@@ -170,7 +187,7 @@ def visualize(run, output=None):
     (output/'outcomes.json').write_text(json.dumps(counts,indent=2)+'\n',encoding='utf-8')
     payload = dict(times=t.tolist(),ids=tracks['ids'],frames=np.round(data,9).tolist(),
         diameter=tracks['diameter'].tolist(),density=density.tolist(),bed=bed,
-        name=run.name,counts=counts,pairEligible=tracks['pair_eligible'])
+        name=run.name,counts=counts,pairEligible=tracks['pair_eligible'],previewOnly=tracks['preview'])
     html = HTML.replace('__DATA__',json.dumps(payload,separators=(',',':')).replace('<','\\u003c'))
     (output/'replay.html').write_text(html,encoding='utf-8')
     return output
@@ -186,7 +203,7 @@ canvas{width:100%;height:560px;background:white;border:1px solid #cbd5df;border-
 input[type=range]{flex:1;min-width:200px}button,select{padding:8px;font:inherit}p{line-height:1.5}
 #details{font-variant-numeric:tabular-nums}h1{font-size:25px}
 </style>
-<h1 id="title"></h1><p>Individual physical spheres in saved carrier flow. All particles are projected onto the selected plane.
+<h1 id="title"></h1><p id="preview-note"></p><p>Individual physical spheres in saved carrier flow. All particles are projected onto the selected plane.
 Radii are drawn to scale. Click a sphere to inspect its ID. A dashed outline marks an escaped particle's last recorded center.</p>
 <div class="controls"><button id="play">Play</button><input id="time" type="range" min="0" value="0" step="1" aria-label="Replay time">
 <span id="clock"></span><label>Plane <select id="plane"><option value="xz">x–z</option><option value="xy">x–y</option><option value="yz">y–z</option></select></label>
@@ -199,6 +216,7 @@ const D=__DATA__, canvas=document.getElementById('plot'), ctx=canvas.getContext(
 const plane=document.getElementById('plane'), color=document.getElementById('color');
 if(D.pairEligible){const option=document.createElement('option');option.value='pair';option.textContent='Pair contact eligibility';color.appendChild(option)}
 document.getElementById('title').textContent=D.name+' — '+D.ids.length+' physical tracers';
+if(D.previewOnly){document.getElementById('title').textContent='Initial placement preview — '+D.ids.length+' physical tracers';document.getElementById('preview-note').textContent='Initialization only. No particle transport has been simulated.'}
 slider.max=D.times.length-1;
 let playing=false, chosen=-1, screen=[];
 const bounds=[0,1,2].map(k=>{let a=Infinity,b=-Infinity;for(const f of D.frames)for(let i=0;i<f.length;i++){a=Math.min(a,f[i][k]-D.diameter[i]/2);b=Math.max(b,f[i][k]+D.diameter[i]/2)}return[a,b]});

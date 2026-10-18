@@ -15,8 +15,9 @@ struct TracerWall
     word name;
     triSurface surface;
     triSurfaceSearch search;
-    TracerWall(const polyPatch& patch, const fvMesh& mesh)
-    : name(patch.name()), surface(makeSurface(patch,mesh)), search(surface) {}
+    scalar restitution, friction;
+    TracerWall(const polyPatch& patch, const fvMesh& mesh, scalar e, scalar mu)
+    : name(patch.name()), surface(makeSurface(patch,mesh)), search(surface), restitution(e), friction(mu) {}
     static triSurface makeSurface(const polyPatch& patch, const fvMesh& mesh)
     {
         DynamicList<face> triangles;
@@ -26,7 +27,7 @@ struct TracerWall
         triSurface original(tris,mesh.points());
         return triSurface(original.localFaces(),original.localPoints());
     }
-    scalar contact(Tracer& p, scalar e, scalar friction) const
+    scalar contact(Tracer& p) const
     {
         scalar r=p.d/2;
         auto hit=search.tree().findNearest(p.x,sqr(r*(1+1e-6)));
@@ -40,7 +41,7 @@ struct TracerWall
         if (gap<r)
         {
             p.x+=(r-gap+1e-10*r)*n;
-            tracerImpulse(p,nullptr,n,e,friction);
+            tracerImpulse(p,nullptr,n,restitution,friction);
             return (r-gap)/r;
         }
         return 0;
@@ -128,11 +129,14 @@ public:
 int main(int argc,char *argv[])
 {
     argList::noParallel();
+    argList::addBoolOption("preview","Validate and export initial placement only; no particle advancement");
     argList::addNote("One-way, finite-radius physical sphere tracking in saved static carrier fields. 1..999 particles, serial replay.");
     #include "setRootCase.H"
     #include "createTime.H"
     IOdictionary cfg(IOobject("largeTracerProperties",runTime.constant(),runTime,
         IOobject::MUST_READ,IOobject::NO_WRITE));
+    const bool preview=args.found("preview");
+    cfg.set("previewOnly",word(preview ? "true" : "false"));
     scalar start=cfg.get<scalar>("startTime"), end=cfg.get<scalar>("endTime");
     requireTracer(std::isfinite(start) && std::isfinite(end) && start>=0 && end>start,
         "Tracking times must be finite, 0<=startTime<endTime");
@@ -149,10 +153,8 @@ int main(int argc,char *argv[])
         requireTracer(type!="empty" && type!="wedge" && !mesh.boundary()[i].coupled(),
             "Use a three-dimensional reconstructed mesh with wall/open boundaries (no empty, wedge, cyclic, or processor patches)");
     }
-    TracerCarrier carrier(mesh,cfg,start,end);
+    TracerCarrier carrier(mesh,cfg,start,end,preview);
     std::vector<std::unique_ptr<TracerWall>> walls;
-    forAll(mesh.boundaryMesh(),i) if (isA<wallPolyPatch>(mesh.boundaryMesh()[i]))
-        walls.emplace_back(new TracerWall(mesh.boundaryMesh()[i],mesh));
 
     label count=cfg.get<label>("count");
     requireTracer(count>0 && count<1000,"count must be in 1..999");
@@ -168,6 +170,33 @@ int main(int argc,char *argv[])
     scalar e=cfg.lookupOrDefault<scalar>("restitution",0.1), friction=cfg.lookupOrDefault<scalar>("friction",0.4);
     requireTracer(std::isfinite(added) && added>=0 && std::isfinite(e) && e>=0 && e<=1
         && std::isfinite(friction) && friction>=0,"Invalid added mass, restitution, or friction");
+    dictionary boundaryRules;
+    if (cfg.found("particleBoundaries")) boundaryRules=cfg.subDict("particleBoundaries");
+    for (const word& name:boundaryRules.toc())
+        requireTracer(mesh.boundaryMesh().findPatchID(name)>=0,"Unknown particle boundary patch: "+name);
+    forAll(mesh.boundaryMesh(),i)
+    {
+        const polyPatch& patch=mesh.boundaryMesh()[i];
+        bool contact=isA<wallPolyPatch>(patch);
+        scalar patchE=e, patchFriction=friction;
+        if (boundaryRules.found(patch.name()))
+        {
+            const dictionary& rule=boundaryRules.subDict(patch.name());
+            word type=rule.get<word>("type");
+            requireTracer(type=="contact" || type=="escape","Particle boundary type must be contact or escape");
+            contact=type=="contact";
+            patchE=rule.lookupOrDefault<scalar>("restitution",e);
+            patchFriction=rule.lookupOrDefault<scalar>("friction",friction);
+            requireTracer(std::isfinite(patchE) && patchE>=0 && patchE<=1
+                && std::isfinite(patchFriction) && patchFriction>=0,"Invalid particle boundary restitution/friction");
+            requireTracer(contact || (!rule.found("restitution") && !rule.found("friction")),
+                "Escape boundaries cannot specify contact coefficients");
+        }
+        if (contact) walls.emplace_back(new TracerWall(patch,mesh,patchE,patchFriction));
+        Info<<"Particle boundary "<<patch.name()<<": "<<(contact ? "contact" : "escape");
+        if (contact) Info<<" restitution="<<patchE<<" friction="<<patchFriction;
+        Info<<nl;
+    }
     bool collisions=cfg.lookupOrDefault<bool>("particleCollisions",true);
     word collisionMode=cfg.lookupOrDefault<word>("particleCollisionMode","all");
     requireTracer(collisionMode=="all" || collisionMode=="largeOnly",
@@ -188,6 +217,7 @@ int main(int argc,char *argv[])
     wordList bedPatches=region.lookupOrDefault<wordList>("bedPatches",wordList(1,"bed"));
     if (placement=="bed")
     {
+        requireTracer(bedPatches.size()>0,"Select at least one contact patch for bed seeding");
         requireTracer(mag(g.x())+mag(g.y())<SMALL && g.z()<0,"Bed placement currently requires downward z gravity");
         for (const auto& name:bedPatches)
         {
@@ -260,8 +290,21 @@ int main(int argc,char *argv[])
         <<"; eligible "<<eligible<<'/'<<count;
     if (collisions && collisionMode=="largeOnly") Info<<"; diameter > "<<collisionThreshold<<" m";
     Info<<nl;
+    if (preview)
+    {
+        word base=cfg.get<word>("runName")+"-preview", name=base;
+        label n=1;
+        while (exists(runTime.path()/"postProcessing"/"largeTracers"/name)) name=base+"-"+Foam::name(n++);
+        cfg.set("runName",name);
+    }
     TracerOutput output(runTime,cfg);
     output.write(start,particles);
+    if (preview)
+    {
+        output.complete(particles);
+        Info<<"Initialization preview completed; no particles were advanced."<<nl;
+        return 0;
+    }
     scalar t=start, nextOutput=min(end,start+outputDt);
     label steps=0, maxSteps=cfg.lookupOrDefault<label>("maxSteps",10000000);
     requireTracer(maxSteps>0,"maxSteps must be positive");
@@ -307,7 +350,7 @@ int main(int argc,char *argv[])
         {
             scalar penetration=0;
             for (auto& p:particles) if (p.active) for (const auto& wall:walls)
-                penetration=max(penetration,wall->contact(p,e,friction));
+                penetration=max(penetration,wall->contact(p));
             std::vector<label> order;
             if (collisions)
             {

@@ -19,7 +19,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
-from large_tracer import TracerConfig, Distribution, save_tracers, foam_vector
+from large_tracer import TracerConfig, Distribution, ParticleBoundary, save_tracers, foam_vector
 from scour_tracer_demo import header, field
 from foam_io import value
 
@@ -374,6 +374,67 @@ for name,extra in [('zero','collisionDiameterThreshold 0;'),
     folder=run(c,config(run_name=name),extra=extra,success=False)
     assert not folder.exists()
 print('PASS invalid native cutoff settings rejected before output',flush=True)
+
+# Per-patch particle boundaries are independent of carrier patch type and of
+# pair-contact coefficients. An open fluid patch can retain solid particles.
+c=box('particle-boundaries',walls=True)
+cfg=config(diameter=Distribution('constant',low=.1),density=Distribution('constant',low=1000),
+    rho_water=1e-6,mu_water=1e-12,added_mass=0,gravity=(0,0,0),end_time=1,
+    boundaries={'downstream':ParticleBoundary('contact',.5,0)},run_name='screen')
+a=run(c,cfg,positions=((.85,.5,.5),),extra='previewOnly true; initialVelocities ((.2 0 0));')
+assert a[:,2].max()<=.95+1e-10 and a[-1,9]==1 and abs(a[-1,5]+.1)<1e-8
+assert value((c/'postProcessing/largeTracers/screen/largeTracerProperties').read_text(),'previewOnly')=='false'
+cfg=replace(cfg,run_name='absorbing-bed',end_time=.6,boundaries={'bed':ParticleBoundary('escape')})
+a=run(c,cfg,positions=((.5,.5,.08),),extra='initialVelocities ((0 0 -.2));')
+assert a[-1,9]==0 and a[-1,4]<0
+cfg=replace(cfg,run_name='smooth-bed',end_time=.3,boundaries={'bed':ParticleBoundary('contact',0,0)})
+a=run(c,cfg,positions=((.5,.5,.08),),extra='initialVelocities ((.05 0 -.2));')
+assert abs(a[-1,4]-.05)<1e-9 and abs(a[-1,5]-.05)<1e-8
+with (c/'postProcessing/largeTracers/smooth-bed/tracks.csv').open() as stream:
+    last=list(csv.DictReader(stream))[-1]
+assert abs(float(last['omega_y']))<1e-10
+print('PASS per-patch contact, restitution, friction and escape independent of carrier BCs',flush=True)
+
+# Authoritative initialization-only preview uses one initialized flow snapshot
+# without requiring the future transient solution or advancing the particles.
+c=box('initial-preview')
+cfg=config(count=3,frozen_flow=False,end_time=5)
+save_tracers(c,cfg)
+before={p:p.read_bytes() for p in (c/'0').iterdir()}
+command(c,['largeTracerFoam','-preview'],'log.preview')
+folder=c/'postProcessing/largeTracers/tracers01-preview'
+assert (folder/'complete').is_file()
+with (folder/'tracks.csv').open() as stream: initial=list(csv.DictReader(stream))
+assert len(initial)==3 and {float(r['time']) for r in initial}=={0}
+assert all(float(r['vx'])==float(r['vy'])==float(r['vz'])==0 for r in initial)
+assert value((folder/'largeTracerProperties').read_text(),'previewOnly')=='true'
+assert all(p.read_bytes()==data for p,data in before.items())
+command(c,['largeTracerFoam','-preview'],'log.preview-repeat')
+assert (c/'postProcessing/largeTracers/tracers01-preview-1/tracks.csv').read_text()==(folder/'tracks.csv').read_text()
+command(c,['largeTracerFoam'],'log.no-future-fields',success=False)
+assert not (c/'postProcessing/largeTracers/tracers01').exists()
+print('PASS initialization-only preview, unique outputs and unchanged initial carrier',flush=True)
+
+# Between saved times preview interpolates U, rather than freezing the nearest
+# field; the requested future interval may extend beyond current saved fields.
+c=box('interpolated-preview')
+(c/'1').mkdir()
+(c/'1/U').write_text((c/'0/U').read_text().replace('uniform (0 0 0)','uniform (0.2 0 0)'))
+cfg=config(initial_velocity='flow',start_time=.5,end_time=5,frozen_flow=False)
+save_tracers(c,cfg)
+command(c,['largeTracerFoam','-preview'],'log.preview')
+with (c/'postProcessing/largeTracers/tracers01-preview/tracks.csv').open() as stream:
+    preview=list(csv.DictReader(stream))
+assert len(preview)==1 and abs(float(preview[0]['vx'])-.1)<1e-10
+print('PASS preview at interpolated transient start time',flush=True)
+
+c=box('invalid-particle-boundaries')
+for name,rule in [('unknown','missing { type contact; }'),('type','bed { type invalid; }'),
+                  ('restitution','bed { type contact; restitution 2; }'),
+                  ('escape-coefficients','bed { type escape; friction 0.1; }')]:
+    folder=run(c,config(run_name=name),extra='particleBoundaries { '+rule+' }',success=False)
+    assert not folder.exists()
+print('PASS invalid native particle boundary rules rejected before output',flush=True)
 
 (WORK/'results.json').write_text(json.dumps(RESULTS,indent=2)+'\n')
 print(json.dumps(RESULTS,indent=2))

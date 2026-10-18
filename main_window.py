@@ -57,6 +57,13 @@ class MainWindow(QMainWindow):
         case_layout.addWidget(self.case_dir_edit, 1)
         case_layout.addWidget(self.case_browse_button)
         layout.addLayout(case_layout)
+        self.workflow=QComboBox()
+        self.workflow.addItem('Flow and sediment setup','flow')
+        self.workflow.addItem('largeTracerFoam — Large particle transport','particles')
+        workflow_row=QHBoxLayout(); workflow_row.addWidget(QLabel('Workbench workflow:')); workflow_row.addWidget(self.workflow,1)
+        layout.addLayout(workflow_row)
+        self.workflow_hint=QLabel(); self.workflow_hint.setWordWrap(True); layout.addWidget(self.workflow_hint)
+        self.particle_workflow=False
 
         # Tab Widget
         self.tabs = QTabWidget()
@@ -110,6 +117,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_tracers, "Large tracers")
         self.tab_tracers.case_prepared.connect(self._on_starter_prepared)
         self.tab_tracers.command_requested.connect(self._run_tracer_command)
+        self.tab_tracers.carrier_boundaries_requested.connect(lambda:self.tabs.setCurrentWidget(self.tab_boundaries))
 
         # Tab 8: Execution & Monitoring
         self.tab_execution = ExecutionTab()
@@ -121,6 +129,8 @@ class MainWindow(QMainWindow):
         self.solver_combo.currentTextChanged.connect(self.tab_execution.set_solver)
         self.tab_execution.combo_solver.currentTextChanged.connect(self._sync_execution_solver)
         self.tab_execution.busy_changed.connect(self.set_busy)
+        self.workflow.currentIndexChanged.connect(self.set_workflow)
+        self.set_workflow()
 
     def setup_conceptual_tab(self):
         main_h_layout = QHBoxLayout(self.tab_concept)
@@ -142,7 +152,8 @@ class MainWindow(QMainWindow):
         solver_layout = QFormLayout()
         self.solver_combo = QComboBox()
         self.solver_combo.addItems(SOLVERS)
-        solver_layout.addRow("Solver:", self.solver_combo)
+        self.solver_field_label=QLabel('Solver:')
+        solver_layout.addRow(self.solver_field_label, self.solver_combo)
         solver_group.setLayout(solver_layout)
         layout.addWidget(solver_group)
 
@@ -422,6 +433,7 @@ class MainWindow(QMainWindow):
                     self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume, self.tab_tracers):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
+        self.workflow.setCurrentIndex(1 if (folder/'tracers.json').is_file() else 0)
         control = folder/'system/controlDict'
         if control.exists():
             try:
@@ -458,6 +470,19 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.tab_execution)
         self.tab_execution.execute_command(command, operation)
 
+    def set_workflow(self):
+        self.particle_workflow=self.workflow.currentData()=='particles'
+        self.run_button.setText('Save large-particle setup' if self.particle_workflow else 'Save plan, time controls and mesh inputs')
+        self.solver_field_label.setText('Carrier flow solver:' if self.particle_workflow else 'Solver:')
+        self.tabs.setTabText(self.tabs.indexOf(self.tab_boundaries),
+            '5. Carrier flow boundaries' if self.particle_workflow else '5. Boundary Conditions')
+        self.workflow_hint.setText('largeTracerFoam uses saved carrier fields. Prepare flow in the carrier tabs; '
+            'configure initialization and particle boundaries, preview placement, and launch tracking in Large tracers.'
+            if self.particle_workflow else '')
+        self.workflow_hint.setVisible(self.particle_workflow)
+        if self.particle_workflow:
+            self.tabs.setCurrentWidget(self.tab_tracers)
+
     def _on_starter_prepared(self, path, solver):
         self.set_case_directory(path)
         self._sync_execution_solver(solver)
@@ -465,6 +490,7 @@ class MainWindow(QMainWindow):
     def set_busy(self, running):
         self.case_browse_button.setEnabled(not running)
         self.run_button.setEnabled(not running)
+        self.workflow.setEnabled(not running)
         for i in range(self.tabs.count()-1):
             self.tabs.setTabEnabled(i, not running)
 

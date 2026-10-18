@@ -1,0 +1,15 @@
+Validation artifacts: <gui-validation-workdir>
+QOpenGLWidget is not supported on this platform.
+This plugin does not support propagateSizeHints()
+QOpenGLWidget: Failed to create context
+PASS specialized GUI setup, native preview, particle boundaries and carrier preservation
+{
+  "particles": 12,
+  "transport_steps": 0,
+  "carrier_mesh_files_unchanged": 8,
+  "carrier_control_unchanged": true,
+  "preview_complete": true,
+  "full_run_blocked_without_future_fields": true,
+  "restitution": 0.05,
+  "friction": 0.65
+}

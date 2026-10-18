@@ -55,7 +55,7 @@ class TracerCarrier
         return value;
     }
 public:
-    TracerCarrier(const fvMesh& mesh, const dictionary& cfg, scalar start, scalar end)
+    TracerCarrier(const fvMesh& mesh, const dictionary& cfg, scalar start, scalar end, bool preview=false)
     : mesh_(mesh), search_(mesh), alphaName_(cfg.get<word>("alphaField")),
       frozen_(cfg.lookupOrDefault<bool>("frozenFlow",false))
     {
@@ -78,16 +78,20 @@ public:
             if (u.typeHeaderOk<volVectorField>(true)) times_.push_back(all[i]);
         }
         requireTracer(!times_.empty(),"No saved carrier U fields found");
+        bool previewSnapshot=false;
+        if (preview && !frozen_)
+            for (const auto& t:times_) if (mag(t.value()-start)<1e-9)
+            {previewSnapshot=true; frozen_=true; break;}
         if (frozen_)
         {
-            scalar snapshot=cfg.lookupOrDefault<scalar>("flowTime",start);
+            scalar snapshot=previewSnapshot ? start : cfg.lookupOrDefault<scalar>("flowTime",start);
             bool found=false;
             for (const auto& t:times_) if (mag(t.value()-snapshot)<1e-9)
             {times_={t}; found=true; break;}
             requireTracer(found,"Frozen flowTime must match a saved U time");
         }
         else requireTracer(times_.size()>=2 && start>=times_.front().value()-1e-10
-            && end<=times_.back().value()+1e-10,
+            && (preview ? start : end)<=times_.back().value()+1e-10,
             "Transient tracking needs >=2 saved U times covering the entire tracking interval. Use frozenFlow explicitly for one snapshot.");
         update(start);
     }

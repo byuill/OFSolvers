@@ -10,6 +10,7 @@ import os
 import re
 import stat
 import tempfile
+import gzip
 
 _TOKEN = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[{}();]|[^\s{}();"]+', re.S)
 
@@ -137,7 +138,11 @@ def update_nested(text, path, updates):
 
 
 def boundary_patches(path):
-    text = Path(path).read_text(encoding='utf-8')
+    path = Path(path)
+    if path.suffix=='.gz':
+        with gzip.open(path,'rt',encoding='utf-8') as stream: text=stream.read()
+    else:
+        text = path.read_text(encoding='utf-8')
     items = tokens(text)
     # Skip the FoamFile dictionary before the numbered patch list.
     i = 0

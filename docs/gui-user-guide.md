@@ -1,5 +1,11 @@
 # River preprocessing GUI
 
+Select **largeTracerFoam — Large particle transport** for the dedicated
+[particle preprocessing and boundary workflow](tracer-workbench.md). It provides
+carrier inspection, placement suggestions, per-patch particle rules, and an
+initialization-only validation preview. Particle saves preserve the carrier
+application, flow time controls, and initial flow boundary fields.
+
 The **Large tracers** tab seeds 1–999 physical spheres into a saved flow model,
 configures size/density distributions and contact, runs `largeTracerFoam`, and
 opens particle trajectories and an interactive replay. It includes a water/air

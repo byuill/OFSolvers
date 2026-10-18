@@ -34,6 +34,9 @@ flow case or a generated scour-hole example. It exports per-ID histories, VTK
 particles, an interactive browser replay, and central x–z carrier velocity plots.
 An optional diameter cutoff restricts noncohesive sediment pair contact to
 pairs whose particles are both larger than the selected size.
+The [particle preprocessing workflow](docs/tracer-workbench.md) inspects carrier
+fields, imports liquid properties, configures per-patch particle contact/escape,
+and validates initial placement before transport.
 
 ## Quick start in the prepared cloud environment
 

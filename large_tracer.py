@@ -60,6 +60,31 @@ def foam_vector(values):
 
 
 @dataclass(frozen=True)
+class ParticleBoundary:
+    behavior: str = 'contact'
+    restitution: float | None = None
+    friction: float | None = None
+
+    def validate(self):
+        if self.behavior not in ('contact','escape'):
+            raise ValueError('Particle boundaries must use contact or escape.')
+        for name in ('restitution','friction'):
+            v = getattr(self,name)
+            if v is not None and (not math.isfinite(v) or v < 0 or name=='restitution' and v > 1):
+                raise ValueError(f'Invalid particle boundary {name}.')
+        if self.behavior=='escape' and (self.restitution is not None or self.friction is not None):
+            raise ValueError('Escape boundaries cannot have contact coefficients.')
+
+    def foam(self):
+        self.validate()
+        body = f'type {self.behavior};'
+        for name in ('restitution','friction'):
+            v = getattr(self,name)
+            if v is not None: body += f' {name} {v:.16g};'
+        return '{ '+body+' }'
+
+
+@dataclass(frozen=True)
 class TracerConfig:
     count: int = 25
     seed: int = 42
@@ -92,6 +117,8 @@ class TracerConfig:
     collisions: bool = True
     collision_mode: str = 'all'
     collision_diameter_threshold: float = .03
+    gravity: tuple = (0,0,-9.81)
+    boundaries: dict = field(default_factory=dict)
     mobilization_diameters: float = 1
     volume_samples: int = 128
 
@@ -101,6 +128,10 @@ class TracerConfig:
                 raise ValueError(f'{name} must be true or false.')
         if self.collision_mode not in ('all','largeOnly'):
             raise ValueError('Particle collision mode must be all or largeOnly.')
+        if len(self.gravity)!=3 or not all(math.isfinite(v) for v in self.gravity):
+            raise ValueError('Gravity needs three finite components.')
+        if self.placement=='bed' and (abs(self.gravity[0])+abs(self.gravity[1])>1e-12 or self.gravity[2]>=0):
+            raise ValueError('Bed placement requires gravity along negative z.')
         if type(self.count) is not int or not 1 <= self.count <= 999:
             raise ValueError('Select 1–999 physical particles.')
         if type(self.seed) is not int or not 0 <= self.seed <= 2147483647:
@@ -117,9 +148,15 @@ class TracerConfig:
         if self.placement not in ('volume', 'bed') or self.initial_velocity not in ('zero', 'flow'):
             raise ValueError('Select volume/bed placement and zero/flow initial velocity.')
         safe_word = r'[A-Za-z_][A-Za-z0-9_.-]*'
+        if self.placement=='bed' and not self.bed_patches:
+            raise ValueError('Select at least one contact seed surface for bed placement.')
         if (not re.fullmatch(safe_word, self.run_name) or not re.fullmatch(safe_word, self.alpha_field)
-                or not self.bed_patches or not all(re.fullmatch(safe_word, p) for p in self.bed_patches)):
+                or not all(re.fullmatch(safe_word, p) for p in self.bed_patches)):
             raise ValueError('Use simple names for the run, alpha field, and bed patches.')
+        for name, boundary in self.boundaries.items():
+            if not re.fullmatch(safe_word,name) or not isinstance(boundary,ParticleBoundary):
+                raise ValueError('Particle boundary settings need literal patch names and ParticleBoundary entries.')
+            boundary.validate()
         if not (math.isfinite(self.start_time) and math.isfinite(self.end_time)
                 and 0 <= self.start_time < self.end_time):
             raise ValueError('Tracking needs 0 ≤ start time < end time.')
@@ -166,11 +203,14 @@ alphaField {self.alpha_field}; volumeSamples {self.volume_samples};
 initialVelocity {self.initial_velocity};
 rhoWater {self.rho_water:.16g}; muWater {self.mu_water:.16g};
 rhoAir {self.rho_air:.16g}; muAir {self.mu_air:.16g};
-g (0 0 -9.81); addedMassCoefficient {self.added_mass:.16g};
+g {foam_vector(self.gravity)}; addedMassCoefficient {self.added_mass:.16g};
 restitution {self.restitution:.16g}; friction {self.friction:.16g};
 particleCollisions {yes(self.collisions)};
 particleCollisionMode {self.collision_mode};
 collisionDiameterThreshold {self.collision_diameter_threshold:.16g};
+particleBoundaries
+{{
+{''.join(' '+name+' '+boundary.foam()+chr(10) for name,boundary in self.boundaries.items())}}}
 mobilizationDiameters {self.mobilization_diameters:.16g};
 '''
 
@@ -183,8 +223,10 @@ mobilizationDiameters {self.mobilization_diameters:.16g};
                 for key in ('values','weights'):
                     if key in distribution: distribution[key] = tuple(distribution[key])
                 data[name] = Distribution(**distribution)
-        for name in ('seed_min','seed_max','retention_min','retention_max','bed_patches'):
+        for name in ('seed_min','seed_max','retention_min','retention_max','bed_patches','gravity'):
             if name in data: data[name] = tuple(data[name])
+        if 'boundaries' in data:
+            data['boundaries'] = {name:ParticleBoundary(**b) for name,b in data['boundaries'].items()}
         result = cls(**data)
         result.validate()
         return result
@@ -195,6 +237,8 @@ def save_tracers(case, config):
     case = Path(case).resolve()
     if not (case/'system/controlDict').is_file():
         raise ValueError('Select an OpenFOAM case with system/controlDict.')
+    if config.boundaries or config.placement=='bed':
+        validate_particle_patches(case,config)
     if (case/'postProcessing/largeTracers'/config.run_name).exists():
         raise ValueError('This run already has output. Choose a new run name.')
     return write_case_files(case, {
@@ -210,12 +254,33 @@ def load_tracers(case):
     return TracerConfig.from_dict(data['settings'])
 
 
-def preflight(case, config):
+def validate_particle_patches(case,config):
+    from tracer_preprocess import carrier_patches
+    patches = {p['name']:p['type'] for p in carrier_patches(case)}
+    unknown = set(config.boundaries)-patches.keys()
+    if unknown:
+        raise ValueError('Unknown particle boundary patches: '+', '.join(sorted(unknown)))
+    unsupported = [name for name,kind in patches.items()
+                   if kind in ('empty','wedge','cyclic','cyclicAMI','processor','processorCyclic')]
+    if unsupported:
+        raise ValueError('Use a static reconstructed 3D mesh; unsupported patches: '+', '.join(unsupported))
+    if config.placement=='bed':
+        for name in config.bed_patches:
+            rule = config.boundaries.get(name)
+            contact = rule.behavior=='contact' if rule else patches.get(name)=='wall'
+            if name not in patches or not contact:
+                raise ValueError(f'Bed seed patch {name} must exist and use particle contact.')
+
+
+def preflight(case, config, preview=False):
     """Cheap checks; native solver also validates mesh, fields and wet placement."""
     config.validate()
     case = Path(case)
     if not (case/'constant/polyMesh/points').is_file() and not (case/'constant/polyMesh/points.gz').is_file():
         raise ValueError('Mesh the case first. Reconstruct parallel carrier fields before replay.')
+    # Some minimal field-only tests have no boundary file; real cases always do.
+    if (case/'constant/polyMesh/boundary').is_file() or (case/'constant/polyMesh/boundary.gz').is_file():
+        validate_particle_patches(case,config)
     saved = []
     for path in case.iterdir():
         try:
@@ -225,7 +290,14 @@ def preflight(case, config):
         if math.isfinite(t) and path.is_dir() and ((path/'U').is_file() or (path/'U.gz').is_file()):
             saved.append((t,path))
     saved.sort()
-    if config.frozen_flow:
+    if preview and not config.frozen_flow:
+        if not saved or config.start_time<saved[0][0]-1e-10 or config.start_time>saved[-1][0]+1e-10:
+            raise ValueError('Initialization preview needs a saved U field at or bracketing the start time.')
+        selected = [p for t,p in saved if abs(t-config.start_time)<1e-9]
+        if not selected:
+            selected = [max((s for s in saved if s[0]<config.start_time),key=lambda s:s[0])[1],
+                        min((s for s in saved if s[0]>config.start_time),key=lambda s:s[0])[1]]
+    elif config.frozen_flow:
         selected = [p for t,p in saved if abs(t-config.flow_time) < 1e-9]
         if not selected:
             raise ValueError('Frozen flow time must match a saved U snapshot.')

@@ -1,0 +1,8 @@
+Validation artifacts: <legacy-validation-workdir>
+QOpenGLWidget is not supported on this platform.
+PASS: sedimentPimpleFoam starter, initial/boundary setup, mesh, QAQC, solver and restart
+PASS: sandParcelPimpleFoam starter, initial/boundary setup, mesh, QAQC, solver and restart
+PASS: GUI decomposition, two-rank resuspension, parallel restart and reconstruction
+PASS: generated background and snappyHexMesh dictionaries execute in v1912
+PASS: custom mesh flow-boundary rebuild, sediment patch setup and native parcel run
+All GUI-to-OpenFOAM workflows passed.

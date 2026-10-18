@@ -6,10 +6,13 @@ import sys
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QHBoxLayout,
     QGroupBox, QLabel, QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox, QCheckBox,
-    QPushButton, QScrollArea, QMessageBox)
+    QPushButton, QScrollArea, QMessageBox, QTabWidget)
 
 from large_tracer import Distribution, TracerConfig, save_tracers, load_tracers, preflight
 from scour_tracer_demo import generate_demo
+from tracer_preprocess import carrier_patches
+from particle_boundary_editor import ParticleBoundaryEditor
+from tracer_preprocess_panel import TracerPreprocessPanel
 
 
 def number(value, minimum=0, maximum=1e9, decimals=6):
@@ -65,18 +68,21 @@ class DistributionEditor(QGroupBox):
 class TracerTab(QWidget):
     command_requested = pyqtSignal(list,str)
     case_prepared = pyqtSignal(str,str)
+    carrier_boundaries_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case_dir = ''
         self._config = TracerConfig()
         root = QVBoxLayout(self)
+        self.pages=QTabWidget()
+        root.addWidget(self.pages)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
         layout = QVBoxLayout(content)
         scroll.setWidget(content)
-        root.addWidget(scroll)
+        self.pages.addTab(scroll,'2. Particle settings')
         info = QLabel('Track 1–999 individual physical spheres in saved OpenFOAM flow fields. '
             'Each particle has its own size, density and ID. Includes inertia, drag, buoyancy, '
             'added mass, wall contact and particle contact. Uses one-way coupling: particles do not alter the flow.\n'
@@ -88,7 +94,9 @@ class TracerTab(QWidget):
         form = QFormLayout()
         layout.addLayout(form)
         self.run_name = QLineEdit()
-        form.addRow('New output run name',self.run_name)
+        run_bar=QHBoxLayout(); run_bar.addWidget(QLabel('Particle run name:')); run_bar.addWidget(self.run_name,1)
+        fresh=QPushButton('Use unused name'); fresh.clicked.connect(self.next_run_name); run_bar.addWidget(fresh)
+        root.insertLayout(0,run_bar)
         self.count = QSpinBox(); self.count.setRange(1,999)
         form.addRow('Number of physical particles',self.count)
         self.seed = QSpinBox(); self.seed.setRange(0,2147483647)
@@ -110,6 +118,8 @@ class TracerTab(QWidget):
         self.placement = QComboBox(); self.placement.addItems(['volume','bed'])
         region_form.addRow('Placement (nonoverlapping, initially wetted)',self.placement)
         self.bed_patches = QLineEdit()
+        self.bed_patches.setReadOnly(True)
+        self.bed_patches.setToolTip('Select seed surfaces in the Particle boundaries page.')
         region_form.addRow('Bed wall patch names (space separated)',self.bed_patches)
         self.initial_velocity = QComboBox(); self.initial_velocity.addItems(['zero','flow'])
         region_form.addRow('Initial particle velocity',self.initial_velocity)
@@ -143,6 +153,10 @@ class TracerTab(QWidget):
             spin = number(1,minimum,maximum,9)
             self.spins[name] = spin
             physics_form.addRow(label,spin)
+        self.gravity=[number(v,-1e6,1e6,9) for v in (0,0,-9.81)]
+        gravity_row=QHBoxLayout()
+        for spin in self.gravity: gravity_row.addWidget(spin)
+        physics_form.addRow('Gravity x, y, z (m/s²)',gravity_row)
         self.collisions = QCheckBox('Enable particle–particle sediment contact')
         physics_form.addRow(self.collisions)
         self.collision_mode = QComboBox()
@@ -160,6 +174,14 @@ class TracerTab(QWidget):
         self.collision_mode.currentIndexChanged.connect(self.update_contact_fields)
         self.volume_samples = QSpinBox(); self.volume_samples.setRange(32,8192)
         physics_form.addRow('Volume quadrature samples per sphere',self.volume_samples)
+        self.boundary_editor=ParticleBoundaryEditor()
+        self.pages.addTab(self.boundary_editor,'3. Particle boundaries')
+        self.preprocessing=TracerPreprocessPanel(self)
+        self.pages.insertTab(0,self.preprocessing,'1. Carrier & placement')
+        self.pages.setCurrentIndex(0)
+        self.spins['restitution'].valueChanged.connect(self.update_boundary_defaults)
+        self.spins['friction'].valueChanged.connect(self.update_boundary_defaults)
+        self.pages.currentChanged.connect(self.update_seed_surfaces)
         for label, callback in [('Save tracer settings',self.save),('Run largeTracerFoam',self.run),
                                 ('Plot trajectories and particle outcomes',self.plot),
                                 ('Generate free-surface scour demo in selected EMPTY folder',self.demo),
@@ -174,6 +196,21 @@ class TracerTab(QWidget):
         self.spins['collision_diameter_threshold'].setEnabled(
             self.collisions.isChecked() and self.collision_mode.currentData()=='largeOnly')
 
+    def next_run_name(self):
+        base=self.run_name.text().strip() or 'tracers01'
+        name=base; n=1
+        folder=Path(self.case_dir)/'postProcessing/largeTracers'
+        while (folder/name).exists():
+            name=f'{base}-{n:02d}'; n+=1
+        self.run_name.setText(name)
+
+    def update_boundary_defaults(self):
+        self.boundary_editor.update_defaults(self.spins['restitution'].value(),self.spins['friction'].value())
+
+    def update_seed_surfaces(self):
+        _,beds=self.boundary_editor.configuration()
+        self.bed_patches.setText(' '.join(beds))
+
     def load_config(self, config):
         self._config = config
         for name in ('run_name','alpha_field'): getattr(self,name).setText(getattr(config,name))
@@ -186,14 +223,21 @@ class TracerTab(QWidget):
         for name, spins in self.boxes.items():
             for spin, value in zip(spins,getattr(config,name)): spin.setValue(value)
         for name, spin in self.spins.items(): spin.setValue(getattr(config,name))
+        for spin,value in zip(self.gravity,config.gravity): spin.setValue(value)
+        try: patches=carrier_patches(self.case_dir) if self.case_dir else []
+        except (OSError,ValueError): patches=[]
+        self.boundary_editor.load(patches,config)
+        self.update_seed_surfaces()
         self.update_contact_fields()
 
     def config(self):
+        boundaries,beds=self.boundary_editor.configuration()
         result = replace(self._config,
             run_name=self.run_name.text().strip(),alpha_field=self.alpha_field.text().strip(),
             count=self.count.value(),seed=self.seed.value(),volume_samples=self.volume_samples.value(),
             diameter=self.diameter.config(),density=self.density.config(),
-            placement=self.placement.currentText(),bed_patches=tuple(self.bed_patches.text().split()),
+            placement=self.placement.currentText(),bed_patches=beds,boundaries=boundaries,
+            gravity=tuple(spin.value() for spin in self.gravity),
             initial_velocity=self.initial_velocity.currentText(),frozen_flow=self.frozen_flow.isChecked(),
             collisions=self.collisions.isChecked(),collision_mode=self.collision_mode.currentData(),
             **{n:tuple(s.value() for s in spins) for n,spins in self.boxes.items()},
@@ -212,6 +256,7 @@ class TracerTab(QWidget):
                 self.status.setText(f'Could not load tracer settings: {exc}')
         else:
             self.status.setText('Set the seed region and carrier times for this case before tracking.')
+        self.preprocessing.refresh()
 
     def save(self):
         try:
@@ -231,6 +276,25 @@ class TracerTab(QWidget):
         except (OSError,ValueError,TypeError) as exc:
             QMessageBox.warning(self,'Tracer carrier check',str(exc)); return
         if self.save(): self.command_requested.emit(['largeTracerFoam'],'large_tracers')
+
+    def preview(self):
+        try: preflight(self.case_dir,self.config(),preview=True)
+        except (OSError,ValueError,TypeError) as exc:
+            QMessageBox.warning(self,'Initial placement check',str(exc)); return
+        if self.save(): self.command_requested.emit(['largeTracerFoam','-preview'],'tracer_preview')
+
+    def plot_preview(self):
+        try:
+            prefix=self.run_name.text().strip()+'-preview'
+            base=Path(self.case_dir)/'postProcessing/largeTracers'
+            candidates=[p for p in base.glob(prefix+'*') if p.name==prefix or p.name.removeprefix(prefix+'-').isdigit()]
+            candidates=[p for p in candidates if (p/'complete').is_file()]
+            if not candidates: raise ValueError('Validate and export initial placement first.')
+            path=max(candidates,key=lambda p:(p/'complete').stat().st_mtime_ns)
+            self.command_requested.emit([sys.executable,str(Path(__file__).with_name('visualize_tracers.py')),
+                str(path),'--carrier','--show'],'tracer_preview_plot')
+        except (OSError,ValueError,TypeError) as exc:
+            QMessageBox.warning(self,'Initial placement preview',str(exc))
 
     def plot(self):
         try:
