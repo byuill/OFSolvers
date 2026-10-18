@@ -86,6 +86,7 @@ struct Tracer
     scalar mobilized=-1, leftRegion=-1, crossedRim=-1, escaped=-1;
     bool active=true;
     bool initiallyInside=false, insideRegion=false;
+    bool pairContactEligible=false;
     Tracer(label n, const point& p, scalar diameter, scalar density)
     : id(n), x(p), initial(p), v(Zero), omega(Zero), d(diameter), rho(density),
       volume(constant::mathematical::pi*pow3(diameter)/6), mass(rho*volume) {}

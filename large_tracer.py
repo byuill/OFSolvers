@@ -90,6 +90,8 @@ class TracerConfig:
     restitution: float = .1
     friction: float = .4
     collisions: bool = True
+    collision_mode: str = 'all'
+    collision_diameter_threshold: float = .03
     mobilization_diameters: float = 1
     volume_samples: int = 128
 
@@ -97,6 +99,8 @@ class TracerConfig:
         for name in ('frozen_flow','collisions'):
             if type(getattr(self,name)) is not bool:
                 raise ValueError(f'{name} must be true or false.')
+        if self.collision_mode not in ('all','largeOnly'):
+            raise ValueError('Particle collision mode must be all or largeOnly.')
         if type(self.count) is not int or not 1 <= self.count <= 999:
             raise ValueError('Select 1–999 physical particles.')
         if type(self.seed) is not int or not 0 <= self.seed <= 2147483647:
@@ -120,7 +124,7 @@ class TracerConfig:
                 and 0 <= self.start_time < self.end_time):
             raise ValueError('Tracking needs 0 ≤ start time < end time.')
         for name in ('output_interval', 'max_delta_t', 'rho_water', 'mu_water',
-                     'rho_air', 'mu_air', 'mobilization_diameters'):
+                     'rho_air', 'mu_air', 'mobilization_diameters', 'collision_diameter_threshold'):
             v = getattr(self, name)
             if not math.isfinite(v) or v <= 0:
                 raise ValueError(f'{name} must be positive and finite.')
@@ -165,6 +169,8 @@ rhoAir {self.rho_air:.16g}; muAir {self.mu_air:.16g};
 g (0 0 -9.81); addedMassCoefficient {self.added_mass:.16g};
 restitution {self.restitution:.16g}; friction {self.friction:.16g};
 particleCollisions {yes(self.collisions)};
+particleCollisionMode {self.collision_mode};
+collisionDiameterThreshold {self.collision_diameter_threshold:.16g};
 mobilizationDiameters {self.mobilization_diameters:.16g};
 '''
 

@@ -12,7 +12,7 @@ def load_tracks(run):
     run = Path(run)
     if not (run/'complete').is_file():
         raise ValueError('The run has no completion marker; inspect the solver log before using its tracks.')
-    with (run/'tracks.csv').open() as stream:
+    with (run/'tracks.csv').open(encoding='utf-8') as stream:
         rows = [{key:float(value) for key,value in row.items()} for row in csv.DictReader(stream)]
     if not rows:
         raise ValueError('No particle tracks found.')
@@ -29,7 +29,9 @@ def load_tracks(run):
     first = {int(r['id']):r for r in rows if r['time']==times[0]}
     return dict(times=np.array(times),ids=ids,data=data,
         diameter=np.array([first[i]['diameter'] for i in ids]),
-        density=np.array([first[i]['density'] for i in ids]))
+        density=np.array([first[i]['density'] for i in ids]),
+        pair_eligible=([bool(first[i]['pair_contact_eligible']) for i in ids]
+                       if 'pair_contact_eligible' in rows[0] else None))
 
 
 def bed_profile(case):
@@ -51,7 +53,7 @@ def plot_carrier(run, output):
     from foam_io import value
     run, output = Path(run).resolve(), Path(output)
     case = run.parents[2]
-    config = (run/'largeTracerProperties').read_text()
+    config = (run/'largeTracerProperties').read_text(encoding='utf-8')
     time = float(value(config,'flowTime' if value(config,'frozenFlow')=='true' else 'endTime'))
     markers = sorted(case.glob('*.foam'))
     temporary = None
@@ -164,13 +166,13 @@ def visualize(run, output=None):
     plt.close(fig)
     # Keep SVG formatting clean in git when validation artifacts are committed.
     svg = output/'trajectories.svg'
-    svg.write_text('\n'.join(line.rstrip() for line in svg.read_text().splitlines())+'\n')
-    (output/'outcomes.json').write_text(json.dumps(counts,indent=2)+'\n')
+    svg.write_text('\n'.join(line.rstrip() for line in svg.read_text(encoding='utf-8').splitlines())+'\n',encoding='utf-8')
+    (output/'outcomes.json').write_text(json.dumps(counts,indent=2)+'\n',encoding='utf-8')
     payload = dict(times=t.tolist(),ids=tracks['ids'],frames=np.round(data,9).tolist(),
         diameter=tracks['diameter'].tolist(),density=density.tolist(),bed=bed,
-        name=run.name,counts=counts)
+        name=run.name,counts=counts,pairEligible=tracks['pair_eligible'])
     html = HTML.replace('__DATA__',json.dumps(payload,separators=(',',':')).replace('<','\\u003c'))
-    (output/'replay.html').write_text(html)
+    (output/'replay.html').write_text(html,encoding='utf-8')
     return output
 
 
@@ -195,6 +197,7 @@ Radii are drawn to scale. Click a sphere to inspect its ID. A dashed outline mar
 <script>
 const D=__DATA__, canvas=document.getElementById('plot'), ctx=canvas.getContext('2d'), slider=document.getElementById('time');
 const plane=document.getElementById('plane'), color=document.getElementById('color');
+if(D.pairEligible){const option=document.createElement('option');option.value='pair';option.textContent='Pair contact eligibility';color.appendChild(option)}
 document.getElementById('title').textContent=D.name+' — '+D.ids.length+' physical tracers';
 slider.max=D.times.length-1;
 let playing=false, chosen=-1, screen=[];
@@ -211,8 +214,8 @@ function draw(){
  for(let j=0;j<=5;j++){let x=x0+dx*j/5,z=z0+dz*j/5;ctx.beginPath();ctx.moveTo(X(x),Z(z0));ctx.lineTo(X(x),Z(z0+dz));ctx.stroke();ctx.fillText(x.toFixed(2),X(x)-10,Z(z0)+22);ctx.beginPath();ctx.moveTo(X(x0),Z(z));ctx.lineTo(X(x0+dx),Z(z));ctx.stroke();ctx.fillText(z.toFixed(2),X(x0)-45,Z(z)+4)}
  ctx.fillText(['x','y','z'][a]+' (m)',w/2,h-12);ctx.fillText(['x','y','z'][b]+' (m)',12,25);
  if(plane.value==='xz'&&D.bed.length){ctx.strokeStyle='#806849';ctx.lineWidth=3;ctx.beginPath();D.bed.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();ctx.strokeStyle='#57a5ca';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(X(0),Z(.5));ctx.lineTo(X(3),Z(.5));ctx.stroke();ctx.setLineDash([])}
- const values=F.map((p,i)=>color.value==='density'?D.density[i]:color.value==='id'?D.ids[i]:Math.hypot(p[3],p[4],p[5]));
- let vmin=Math.min(...values),vmax=Math.max(...values);screen=[];
+ const values=F.map((p,i)=>color.value==='pair'?Number(D.pairEligible[i]):color.value==='density'?D.density[i]:color.value==='id'?D.ids[i]:Math.hypot(p[3],p[4],p[5]));
+ let vmin=color.value==='pair'?0:Math.min(...values),vmax=color.value==='pair'?1:Math.max(...values);screen=[];
  for(let i=0;i<F.length;i++){
   const p=F[i], fraction=(values[i]-vmin)/(vmax-vmin||1), c='hsl('+(245-210*fraction)+',65%,45%)';
   ctx.strokeStyle=c;ctx.globalAlpha=.3;ctx.lineWidth=1;ctx.beginPath();
@@ -223,7 +226,7 @@ function draw(){
  }
  document.getElementById('clock').textContent=D.times[frame].toFixed(3)+' s';
  document.getElementById('stats').textContent='Active: '+F.filter(p=>p[6]).length+' | Inside region: '+F.filter(p=>p[6]&&p[10]).length+' | Mobilized: '+F.filter(p=>p[7]).length+' | Ever left region: '+F.filter(p=>p[8]).length+' | Crossed rim: '+F.filter(p=>p[9]).length+' | '+color.options[color.selectedIndex].text+' range: '+vmin.toPrecision(4)+'–'+vmax.toPrecision(4);
- if(chosen>=0){let p=F[chosen];document.getElementById('details').textContent='ID '+D.ids[chosen]+' | diameter '+D.diameter[chosen].toPrecision(4)+' m | density '+D.density[chosen].toFixed(1)+' kg/m³ | position ('+p.slice(0,3).map(v=>v.toFixed(4)).join(', ')+') m | speed '+Math.hypot(p[3],p[4],p[5]).toFixed(4)+' m/s'}
+ if(chosen>=0){let p=F[chosen];document.getElementById('details').textContent='ID '+D.ids[chosen]+' | diameter '+D.diameter[chosen].toPrecision(4)+' m | density '+D.density[chosen].toFixed(1)+' kg/m³ | position ('+p.slice(0,3).map(v=>v.toFixed(4)).join(', ')+') m | speed '+Math.hypot(p[3],p[4],p[5]).toFixed(4)+' m/s'+(D.pairEligible?' | Pair contact: '+(D.pairEligible[chosen]?'eligible':'excluded'):'')}
 }
 slider.oninput=draw;plane.onchange=draw;color.onchange=draw;window.onresize=draw;
 document.getElementById('play').onclick=()=>{playing=!playing;document.getElementById('play').textContent=playing?'Pause':'Play'};

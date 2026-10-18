@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from large_tracer import TracerConfig, Distribution, save_tracers, foam_vector
 from scour_tracer_demo import header, field
+from foam_io import value
 
 
 WORK = Path(tempfile.mkdtemp(prefix='large-tracer-validation-'))
@@ -81,9 +82,12 @@ def config(**kw):
     return replace(base,**kw)
 
 
-def run(case,cfg,positions=((.3,.5,.3),),extra='',success=True):
+def run(case,cfg,positions=((.3,.5,.3),),extra='',success=True,legacy_contact_settings=False):
     save_tracers(case,cfg)
     props=case/'constant/largeTracerProperties'
+    if legacy_contact_settings:
+        props.write_text('\n'.join(line for line in props.read_text().splitlines()
+            if not line.startswith(('particleCollisionMode ','collisionDiameterThreshold ')))+'\n')
     with props.open('a') as stream:
         stream.write('\ninitialPositions ('+' '.join(foam_vector(p) for p in positions)+');\n'+extra)
     before={str(p.relative_to(case)):hashlib.sha256(p.read_bytes()).hexdigest()
@@ -244,6 +248,132 @@ with (c/'postProcessing/largeTracers/tracers01/summary.csv').open() as stream:
     population=list(csv.DictReader(stream))
 assert len(population)==999 and len({r['id'] for r in population})==999
 print('PASS 999 independent physical particles',flush=True)
+
+# Sediment-contact cutoff: BOTH diameters must be strictly above the cutoff.
+# All/disabled modes and old dictionaries retain their original behavior.
+c=box('contact-cutoff')
+pair_cfg=config(count=2,diameter=Distribution('constant',low=.1),
+    density=Distribution('constant',low=1000),rho_water=1e-6,mu_water=1e-12,
+    added_mass=0,restitution=1,friction=0,end_time=.6)
+positions=((.4,.5,.5),(.6,.5,.5))
+pair_extra='g (0 0 0); initialVelocities ((.2 0 0) (-.2 0 0));\n'
+cutoff_results={}
+for name,mode,threshold,enabled,bounce,legacy in [
+    ('above','largeOnly',.099999999,True,True,False),
+    ('equal','largeOnly',.1,True,False,False),
+    ('below','largeOnly',.101,True,False,False),
+    ('all','all',.101,True,True,False),
+    ('off','largeOnly',.099,False,False,False),
+    ('legacy-on','all',.1,True,True,True),
+    ('legacy-off','all',.1,False,False,True)]:
+    cfg=replace(pair_cfg,run_name=name,collision_mode=mode,
+        collision_diameter_threshold=threshold,collisions=enabled)
+    a=run(c,cfg,positions,pair_extra,legacy_contact_settings=legacy)
+    last=a[-2:]
+    np.testing.assert_allclose(last[:,5],[-.2,.2] if bounce else [.2,-.2],atol=1e-8,rtol=0)
+    if bounce:
+        assert np.min(a[1::2,2]-a[::2,2])>=.1-1e-10
+    else:
+        assert last[0,2]>last[1,2], 'Excluded pairs must have neither impulse nor overlap correction'
+    with (c/'postProcessing/largeTracers'/name/'summary.csv').open() as stream:
+        flags=[int(r['pair_contact_eligible']) for r in csv.DictReader(stream)]
+    assert flags==[int(bounce)]*2
+    if not legacy:
+        snapshot=(c/'postProcessing/largeTracers'/name/'largeTracerProperties').read_text()
+        assert float(value(snapshot,'collisionDiameterThreshold'))==threshold
+    cutoff_results[name]={'eligible':sum(flags),'bounced':bounce}
+RESULTS['diameter_cutoff_modes']=cutoff_results
+print('PASS strict diameter cutoff, all/off modes and legacy dictionaries',flush=True)
+
+# A large-small pair is excluded in threshold mode; in all mode its elastic
+# collision follows the independently calculated unequal-mass collision law.
+c=box('mixed-size-contact')
+mixed=replace(pair_cfg,seed=2,diameter=Distribution('discrete',values=(.04,.1),weights=(1,1)),
+    collision_mode='largeOnly',collision_diameter_threshold=.06,run_name='large-only')
+a=run(c,mixed,positions,pair_extra)
+with (c/'postProcessing/largeTracers/large-only/summary.csv').open() as stream:
+    initial=list(csv.DictReader(stream))
+diameters=np.array([float(r['diameter']) for r in initial])
+assert set(diameters)=={.04,.1},'This seed must exercise a genuinely mixed-size pair'
+assert [int(r['pair_contact_eligible']) for r in initial]==[int(d>.06) for d in diameters]
+np.testing.assert_allclose(a[-2:,5],[.2,-.2],atol=1e-8,rtol=0)
+assert a[-2,2]>a[-1,2]
+b=run(c,replace(mixed,run_name='all',collision_mode='all'),positions,pair_extra)
+mass=1000*np.pi*diameters**3/6
+expected=np.array([((mass[0]-mass[1])*.2-2*mass[1]*.2)/sum(mass),
+                   (2*mass[0]*.2-(mass[1]-mass[0])*.2)/sum(mass)])
+np.testing.assert_allclose(b[-2:,5],expected,atol=1e-8,rtol=0)
+RESULTS['mixed_size_pair']={'diameters_m':diameters.tolist(),
+    'large_only_final_vx':a[-2:,5].tolist(),'all_final_vx':b[-2:,5].tolist()}
+print('PASS large-small pass-through and unequal-mass all-mode collision',flush=True)
+
+# Coarse-sediment impact: normal restitution dissipates kinetic energy while
+# conserving the isolated pair's linear momentum.
+c=box('inelastic-contact')
+cfg=replace(pair_cfg,run_name='inelastic',collision_mode='largeOnly',
+    collision_diameter_threshold=.05,restitution=.3)
+a=run(c,cfg,positions,pair_extra)
+ratio=float(np.sum(a[-2:,5:8]**2)/(2*.2**2))
+assert abs(ratio-.3**2)<1e-8 and np.linalg.norm(a[-2:,5:8].sum(axis=0))<1e-12
+RESULTS['inelastic_pair_energy_ratio']=ratio
+print('PASS sediment normal restitution and energy dissipation',flush=True)
+
+# An oblique impact independently checks the Coulomb impulse bound, momentum,
+# normal restitution and spin generated by tangential grain contact.
+c=box('frictional-contact')
+oblique='g (0 0 0); initialVelocities ((.2 .05 0) (-.2 -.05 0));\n'
+RESULTS['frictional_pair']={}
+for regime,mu in [('sticking',.4),('sliding',.05)]:
+    cfg=replace(pair_cfg,run_name=regime,collision_mode='largeOnly',
+        collision_diameter_threshold=.05,restitution=.3,friction=mu,
+        max_delta_t=.0005,output_interval=.0005,end_time=.5)
+    run(c,cfg,positions,oblique)
+    with (c/'postProcessing/largeTracers'/regime/'tracks.csv').open() as stream:
+        rows=[{k:float(v) for k,v in row.items()} for row in csv.DictReader(stream)]
+    state=np.array([[r[k] for k in ('x','y','z','vx','vy','vz','omega_x','omega_y','omega_z')]
+        for r in rows]).reshape(-1,2,9)
+    impact=next(i for i,s in enumerate(state) if np.linalg.norm(s[:,6:])>1e-6)
+    before,after=state[impact-1],state[impact]
+    n=after[0,:3]-after[1,:3]; n/=np.linalg.norm(n)
+    m=1000*np.pi*.1**3/6
+    j=m*(after[0,3:6]-before[0,3:6]); jn=float(j@n)
+    jt=float(np.linalg.norm(j-jn*n))
+    assert jn>0 and jt>0 and jt<=cfg.friction*jn+1e-10
+    normal_ratio=-float((after[0,3:6]-after[1,3:6])@n)/float((before[0,3:6]-before[1,3:6])@n)
+    assert abs(normal_ratio-cfg.restitution)<1e-8
+    inertia=.4*m*.05**2
+    np.testing.assert_allclose(after[0,6:],np.cross(-.05*n,j)/inertia,atol=1e-8,rtol=0)
+    contact_slip=(after[0,3:6]-after[1,3:6]
+        +np.cross(after[0,6:],-.05*n)-np.cross(after[1,6:],.05*n))
+    tangent_speed=np.linalg.norm(contact_slip-(contact_slip@n)*n)
+    if regime=='sliding':
+        assert abs(jt/jn-mu)<1e-8 and tangent_speed>1e-4
+    else:
+        assert tangent_speed<1e-8
+    assert np.linalg.norm(state[-1,:,3:6].sum(axis=0))<1e-12
+    energy=float((m*np.sum(state[-1,:,3:6]**2)+inertia*np.sum(state[-1,:,6:]**2))/2)
+    initial_energy=m*(.2**2+.05**2)
+    assert energy<initial_energy
+    RESULTS['frictional_pair'][regime]={'normal_restitution':normal_ratio,
+        'tangential_to_normal_impulse_ratio':jt/jn,'kinetic_energy_ratio':energy/initial_energy}
+print('PASS sediment sliding friction, normal restitution, spin and energy loss',flush=True)
+
+# The pair cutoff must not switch off fluid forcing or sediment/bed contact.
+c=box('small-wall-contact',walls=True)
+cfg=config(diameter=Distribution('constant',low=.1),density=Distribution('constant',low=1200),
+    collision_mode='largeOnly',collision_diameter_threshold=.2,end_time=.5)
+a=run(c,cfg,positions=((.5,.5,.07),))
+assert a[:,4].min()>=.05-1e-10 and abs(a[-1,4]-.05)<1e-6
+print('PASS below-threshold settling and finite-radius bed contact',flush=True)
+
+# Native validation also applies to hand-edited dictionaries, before output.
+c=box('invalid-contact-settings')
+for name,extra in [('zero','collisionDiameterThreshold 0;'),
+                   ('negative','collisionDiameterThreshold -0.1;'),
+                   ('mode','particleCollisionMode invalid;')]:
+    folder=run(c,config(run_name=name),extra=extra,success=False)
+    assert not folder.exists()
+print('PASS invalid native cutoff settings rejected before output',flush=True)
 
 (WORK/'results.json').write_text(json.dumps(RESULTS,indent=2)+'\n')
 print(json.dumps(RESULTS,indent=2))

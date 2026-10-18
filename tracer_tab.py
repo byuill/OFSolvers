@@ -143,8 +143,21 @@ class TracerTab(QWidget):
             spin = number(1,minimum,maximum,9)
             self.spins[name] = spin
             physics_form.addRow(label,spin)
-        self.collisions = QCheckBox('Enable sphere–sphere contact')
+        self.collisions = QCheckBox('Enable particle–particle sediment contact')
         physics_form.addRow(self.collisions)
+        self.collision_mode = QComboBox()
+        self.collision_mode.addItem('All particle sizes','all')
+        self.collision_mode.addItem('Both diameters above threshold','largeOnly')
+        physics_form.addRow('Particle–particle contact mode',self.collision_mode)
+        self.spins['collision_diameter_threshold'] = number(.03,1e-9,1e9,9)
+        physics_form.addRow('Pair-contact diameter threshold (m)',self.spins['collision_diameter_threshold'])
+        self.collision_note = QLabel('In threshold mode, both particles must have diameter > threshold. '
+            'Uses inelastic normal contact and Coulomb friction with rotation. '
+            'All particles retain fluid forces and bed/wall contact.')
+        self.collision_note.setWordWrap(True)
+        physics_form.addRow(self.collision_note)
+        self.collisions.toggled.connect(self.update_contact_fields)
+        self.collision_mode.currentIndexChanged.connect(self.update_contact_fields)
         self.volume_samples = QSpinBox(); self.volume_samples.setRange(32,8192)
         physics_form.addRow('Volume quadrature samples per sphere',self.volume_samples)
         for label, callback in [('Save tracer settings',self.save),('Run largeTracerFoam',self.run),
@@ -156,17 +169,24 @@ class TracerTab(QWidget):
         self.status.setWordWrap(True); layout.addWidget(self.status)
         self.load_config(self._config)
 
+    def update_contact_fields(self):
+        self.collision_mode.setEnabled(self.collisions.isChecked())
+        self.spins['collision_diameter_threshold'].setEnabled(
+            self.collisions.isChecked() and self.collision_mode.currentData()=='largeOnly')
+
     def load_config(self, config):
         self._config = config
         for name in ('run_name','alpha_field'): getattr(self,name).setText(getattr(config,name))
         self.bed_patches.setText(' '.join(config.bed_patches))
         for name in ('count','seed','volume_samples'): getattr(self,name).setValue(getattr(config,name))
         for name in ('frozen_flow','collisions'): getattr(self,name).setChecked(getattr(config,name))
+        self.collision_mode.setCurrentIndex(self.collision_mode.findData(config.collision_mode))
         for name in ('placement','initial_velocity'): getattr(self,name).setCurrentText(getattr(config,name))
         for name in ('diameter','density'): getattr(self,name).load(getattr(config,name))
         for name, spins in self.boxes.items():
             for spin, value in zip(spins,getattr(config,name)): spin.setValue(value)
         for name, spin in self.spins.items(): spin.setValue(getattr(config,name))
+        self.update_contact_fields()
 
     def config(self):
         result = replace(self._config,
@@ -175,7 +195,8 @@ class TracerTab(QWidget):
             diameter=self.diameter.config(),density=self.density.config(),
             placement=self.placement.currentText(),bed_patches=tuple(self.bed_patches.text().split()),
             initial_velocity=self.initial_velocity.currentText(),frozen_flow=self.frozen_flow.isChecked(),
-            collisions=self.collisions.isChecked(),**{n:tuple(s.value() for s in spins) for n,spins in self.boxes.items()},
+            collisions=self.collisions.isChecked(),collision_mode=self.collision_mode.currentData(),
+            **{n:tuple(s.value() for s in spins) for n,spins in self.boxes.items()},
             **{n:s.value() for n,s in self.spins.items()})
         result.validate()
         return result

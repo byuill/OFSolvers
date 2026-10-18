@@ -68,6 +68,7 @@ public:
         requireTracer(!exists(path_),"Tracer output already exists: "+path_+". Choose a new runName; existing tracks are never overwritten.");
         mkDir(path_);
         OFstream config(path_/"largeTracerProperties");
+        config.precision(16);
         cfg.writeHeader(config); cfg.dictionary::write(config,false);
         history_.open((path_/"tracks.csv").c_str());
         events_.open((path_/"events.csv").c_str());
@@ -75,7 +76,7 @@ public:
         requireTracer(history_.good() && events_.good() && pvd_.good(),"Cannot create tracer output files");
         history_<<std::setprecision(16);
         events_<<std::setprecision(16)<<"time,id,event\n";
-        history_<<"time,id,x,y,z,vx,vy,vz,omega_x,omega_y,omega_z,diameter,density,water_fraction,active,mobilized,left_region,crossed_rim,max_displacement,inside_region\n";
+        history_<<"time,id,x,y,z,vx,vy,vz,omega_x,omega_y,omega_z,diameter,density,water_fraction,active,mobilized,left_region,crossed_rim,max_displacement,inside_region,pair_contact_eligible\n";
         pvd_<<"<?xml version=\"1.0\"?>\n<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\"><Collection>\n";
         Info<<"Tracer output: "<<path_<<nl;
     }
@@ -89,7 +90,7 @@ public:
             history_<<time<<','<<p.id<<','<<p.x.x()<<','<<p.x.y()<<','<<p.x.z()<<','
                 <<p.v.x()<<','<<p.v.y()<<','<<p.v.z()<<','<<p.omega.x()<<','<<p.omega.y()<<','<<p.omega.z()<<','
                 <<p.d<<','<<p.rho<<','<<p.water<<','<<p.active<<','<<(p.mobilized>=0)<<','
-                <<(p.leftRegion>=0)<<','<<(p.crossedRim>=0)<<','<<p.maxDisplacement<<','<<p.insideRegion<<'\n';
+                <<(p.leftRegion>=0)<<','<<(p.crossedRim>=0)<<','<<p.maxDisplacement<<','<<p.insideRegion<<','<<p.pairContactEligible<<'\n';
         }
         fileName name="particles_"+Foam::name(frame_++)+".vtk";
         std::ofstream vtk((path_/name).c_str());
@@ -100,11 +101,12 @@ public:
         for (label i=0;i<active;++i) vtk<<"1 "<<i<<'\n';
         vtk<<"POINT_DATA "<<active<<"\nVECTORS velocity double\n";
         for (const auto& p:particles) if (p.active) vtk<<p.v.x()<<' '<<p.v.y()<<' '<<p.v.z()<<'\n';
-        for (const word& field:{word("id"),word("diameter"),word("density"),word("water_fraction")})
+        for (const word& field:{word("id"),word("diameter"),word("density"),word("water_fraction"),word("pair_contact_eligible")})
         {
             vtk<<"SCALARS "<<field<<" double 1\nLOOKUP_TABLE default\n";
             for (const auto& p:particles) if (p.active)
-                vtk<<(field=="id" ? p.id : field=="diameter" ? p.d : field=="density" ? p.rho : p.water)<<'\n';
+                vtk<<(field=="id" ? p.id : field=="diameter" ? p.d : field=="density" ? p.rho
+                    : field=="water_fraction" ? p.water : p.pairContactEligible)<<'\n';
         }
         pvd_<<std::setprecision(16)<<"<DataSet timestep=\""<<time<<"\" group=\"\" part=\"0\" file=\""<<name<<"\"/>\n";
         history_.flush(); events_.flush(); pvd_.flush();
@@ -113,10 +115,10 @@ public:
     void complete(const std::vector<Tracer>& particles)
     {
         std::ofstream summary((path_/"summary.csv").c_str());
-        summary<<std::setprecision(16)<<"id,diameter,density,mass,initial_x,initial_y,initial_z,mobilized_time,left_region_time,crossed_rim_time,escaped_time,max_displacement,active,initially_inside_region,inside_region\n";
+        summary<<std::setprecision(16)<<"id,diameter,density,mass,initial_x,initial_y,initial_z,mobilized_time,left_region_time,crossed_rim_time,escaped_time,max_displacement,active,initially_inside_region,inside_region,pair_contact_eligible\n";
         for (const auto& p:particles)
             summary<<p.id<<','<<p.d<<','<<p.rho<<','<<p.mass<<','<<p.initial.x()<<','<<p.initial.y()<<','<<p.initial.z()<<','
-                <<p.mobilized<<','<<p.leftRegion<<','<<p.crossedRim<<','<<p.escaped<<','<<p.maxDisplacement<<','<<p.active<<','<<p.initiallyInside<<','<<p.insideRegion<<'\n';
+                <<p.mobilized<<','<<p.leftRegion<<','<<p.crossedRim<<','<<p.escaped<<','<<p.maxDisplacement<<','<<p.active<<','<<p.initiallyInside<<','<<p.insideRegion<<','<<p.pairContactEligible<<'\n';
         pvd_<<"</Collection></VTKFile>\n"; pvd_.flush(); summary.close();
         requireTracer(summary.good() && pvd_.good(),"Cannot finish tracer output");
         std::ofstream done((path_/"complete").c_str()); done<<"Tracking completed successfully\n";
@@ -167,6 +169,10 @@ int main(int argc,char *argv[])
     requireTracer(std::isfinite(added) && added>=0 && std::isfinite(e) && e>=0 && e<=1
         && std::isfinite(friction) && friction>=0,"Invalid added mass, restitution, or friction");
     bool collisions=cfg.lookupOrDefault<bool>("particleCollisions",true);
+    word collisionMode=cfg.lookupOrDefault<word>("particleCollisionMode","all");
+    requireTracer(collisionMode=="all" || collisionMode=="largeOnly",
+        "particleCollisionMode must be all or largeOnly");
+    scalar collisionThreshold=positiveTracer(cfg,"collisionDiameterThreshold",0.03);
     label contactIterations=cfg.lookupOrDefault<label>("contactIterations",32);
     requireTracer(contactIterations>0 && contactIterations<=1024,"contactIterations must be 1..1024");
     const dictionary& region=cfg.subDict("seedRegion");
@@ -236,6 +242,10 @@ int main(int argc,char *argv[])
         requireTracer(placed,"Could not place particle "+Foam::name(i)+" (d="+Foam::name(d)+
             ") fully inside the initial wetted region without overlap. Enlarge the seed region, reduce count/sizes, or check alpha.");
         particles.emplace_back(i,p,d,rho);
+        // The cutoff controls PAIR contact only. A small tracer still samples
+        // flow and contacts every wall; even its overlap with a large tracer
+        // must not receive a pair impulse or an excluded-volume correction.
+        particles.back().pairContactEligible=collisions && (collisionMode=="all" || d>collisionThreshold);
         particles.back().water=flow.water;
         particles.back().initiallyInside=particles.back().insideRegion=inBox(p,roiLo,roiHi);
         if (initialVelocity=="flow") particles.back().v=flow.water*flow.uw+(1-flow.water)*flow.ua;
@@ -245,6 +255,11 @@ int main(int argc,char *argv[])
     }
     scalar totalVolume=0; for (const auto& p:particles) totalVolume+=p.volume;
     Info<<"Seeded "<<count<<" physical spheres, total volume "<<totalVolume<<" m^3. One-way coupling; check local volume loading."<<nl;
+    label eligible=0; for (const auto& p:particles) eligible+=p.pairContactEligible;
+    Info<<"Particle-particle sediment contact: "<<(collisions ? collisionMode : word("off"))
+        <<"; eligible "<<eligible<<'/'<<count;
+    if (collisions && collisionMode=="largeOnly") Info<<"; diameter > "<<collisionThreshold<<" m";
+    Info<<nl;
     TracerOutput output(runTime,cfg);
     output.write(start,particles);
     scalar t=start, nextOutput=min(end,start+outputDt);
@@ -296,7 +311,7 @@ int main(int argc,char *argv[])
             std::vector<label> order;
             if (collisions)
             {
-                for (label i=0;i<count;++i) if (particles[i].active) order.push_back(i);
+                for (label i=0;i<count;++i) if (particles[i].active && particles[i].pairContactEligible) order.push_back(i);
                 std::sort(order.begin(),order.end(),[&](label i,label j)
                     {return particles[i].x.x()-particles[i].d/2 < particles[j].x.x()-particles[j].d/2;});
             }

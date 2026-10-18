@@ -1,5 +1,8 @@
 # Large tracer validation — 18 October 2026
 
+The later [diameter-cutoff validation](diameter-cutoff/README.md) covers the
+large-particle-only sediment-contact mode and the expanded regression suite.
+
 The tested implementation is `largeTracerFoam` on OpenFOAM.com v1912,
 double precision with 32-bit labels, built with GCC 14 in the prepared Linux
 environment. `./Allwmake` completed for all four repository solvers. These checks validate the implemented mechanics and replay

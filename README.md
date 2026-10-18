@@ -32,6 +32,8 @@ mesh refinement from the desktop workbench or `castle_flume.py`.
 The **Large tracers** workbench tab configures physical particles in an existing
 flow case or a generated scour-hole example. It exports per-ID histories, VTK
 particles, an interactive browser replay, and central x–z carrier velocity plots.
+An optional diameter cutoff restricts noncohesive sediment pair contact to
+pairs whose particles are both larger than the selected size.
 
 ## Quick start in the prepared cloud environment
 

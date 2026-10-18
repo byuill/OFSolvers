@@ -19,7 +19,10 @@ from foam_io import value, entries
     {'run_name':'bad;name'},{'alpha_field':'bad;field'},
     {'seed_min':(0,0,1)},{'density':Distribution('constant',low=-1)},
     {'restitution':1.1},{'min_water_fraction':0},{'volume_samples':12},
-    {'friction':float('inf')},{'rim_elevation':float('nan')}])
+    {'friction':float('inf')},{'rim_elevation':float('nan')},
+    {'collision_mode':'bad'},{'collision_diameter_threshold':0},
+    {'collision_diameter_threshold':-.01},{'collision_diameter_threshold':float('nan')},
+    {'collision_diameter_threshold':float('inf')}])
 def test_invalid_settings_do_not_modify_case(tmp_path,kwargs):
     with pytest.raises(ValueError):
         save_tracers(tmp_path,replace(TracerConfig(),**kwargs))
@@ -60,6 +63,39 @@ def test_configuration_roundtrip_backups_and_output_protection(tmp_path):
     assert (tmp_path/'system/controlDict').read_text()=='application interFoam;'
     (tmp_path/'postProcessing/largeTracers/tracers01').mkdir(parents=True)
     with pytest.raises(ValueError,match='already has output'): save_tracers(tmp_path,config)
+
+
+@pytest.mark.parametrize('enabled',[True,False])
+def test_legacy_collision_settings_load_without_changing_behavior(enabled):
+    data=asdict(replace(TracerConfig(),collisions=enabled))
+    del data['collision_mode'],data['collision_diameter_threshold']
+    config=TracerConfig.from_dict(data)
+    assert config.collisions is enabled and config.collision_mode=='all'
+    assert value(config.foam(),'particleCollisions')==('true' if enabled else 'false')
+
+
+def test_threshold_mode_configuration_and_workbench_roundtrip(qapp,dialogs,tmp_path):
+    generate_demo(tmp_path)
+    tab=TracerTab()
+    tab.set_case_directory(str(tmp_path))
+    threshold=tab.spins['collision_diameter_threshold']
+    assert not threshold.isEnabled()
+    tab.collision_mode.setCurrentIndex(tab.collision_mode.findData('largeOnly'))
+    assert threshold.isEnabled()
+    threshold.setValue(.045)
+    assert tab.save()
+    cfg=load_tracers(tmp_path)
+    assert cfg.collision_mode=='largeOnly' and cfg.collision_diameter_threshold==.045
+    props=(tmp_path/'constant/largeTracerProperties').read_text()
+    assert value(props,'particleCollisionMode')=='largeOnly'
+    assert float(value(props,'collisionDiameterThreshold'))==.045
+    tab.set_case_directory(str(tmp_path))
+    assert tab.collision_mode.currentData()=='largeOnly' and threshold.value()==.045
+    tab.collisions.setChecked(False)
+    assert not threshold.isEnabled() and not tab.collision_mode.isEnabled()
+    assert tab.save() and not load_tracers(tmp_path).collisions
+    assert not dialogs
+    tab.close()
 
 
 def test_replay_requires_actual_carrier_and_explicit_frozen_mode(tmp_path):
@@ -106,21 +142,26 @@ def test_workbench_roundtrip_and_run_preflight(qapp,dialogs,tmp_path):
     tab.close()
 
 
-def test_plots_replay_and_persistent_ids(tmp_path):
+@pytest.mark.parametrize('with_eligibility',[False,True])
+def test_plots_replay_and_persistent_ids(tmp_path,with_eligibility):
     run=tmp_path/'postProcessing/largeTracers/test'
     run.mkdir(parents=True)
     columns=['time','id','x','y','z','vx','vy','vz','active','mobilized','left_region','crossed_rim','diameter','density','inside_region']
+    if with_eligibility: columns.append('pair_contact_eligible')
     with (run/'tracks.csv').open('w') as stream:
         writer=csv.DictWriter(stream,fieldnames=columns); writer.writeheader()
         for t in (0,1):
             for id in (3,8):
-                writer.writerow(dict(time=t,id=id,x=.1*t,y=.5,z=.3+.1*t,
+                row=dict(time=t,id=id,x=.1*t,y=.5,z=.3+.1*t,
                     vx=.1,vy=0,vz=.1,active=1,mobilized=t,left_region=0,crossed_rim=0,
-                    diameter=.05,density=500+id,inside_region=1))
+                    diameter=.05,density=500+id,inside_region=1)
+                if with_eligibility: row['pair_contact_eligible']=int(id==8)
+                writer.writerow(row)
     with pytest.raises(ValueError,match='completion'): load_tracks(run)
     (run/'complete').touch()
     data=load_tracks(run)
     assert data['ids']==[3,8] and data['data'].shape==(2,2,11)
+    assert data['pair_eligible']==([False,True] if with_eligibility else None)
     out=visualize(run)
     assert (out/'trajectories.png').stat().st_size>1000
     assert '__DATA__' not in (out/'replay.html').read_text()
