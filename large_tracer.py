@@ -1,5 +1,6 @@
 """Configuration for largeTracerFoam: individual physical spheres in saved flow."""
 from dataclasses import asdict, dataclass, field
+from bisect import bisect_left, bisect_right
 import argparse
 import json
 import math
@@ -281,15 +282,8 @@ def preflight(case, config, preview=False):
     # Some minimal field-only tests have no boundary file; real cases always do.
     if (case/'constant/polyMesh/boundary').is_file() or (case/'constant/polyMesh/boundary.gz').is_file():
         validate_particle_patches(case,config)
-    saved = []
-    for path in case.iterdir():
-        try:
-            t = float(path.name)
-        except ValueError:
-            continue
-        if math.isfinite(t) and path.is_dir() and ((path/'U').is_file() or (path/'U.gz').is_file()):
-            saved.append((t,path))
-    saved.sort()
+    from tracer_preprocess import numeric_times
+    saved = numeric_times(case)
     if preview and not config.frozen_flow:
         if not saved or config.start_time<saved[0][0]-1e-10 or config.start_time>saved[-1][0]+1e-10:
             raise ValueError('Initialization preview needs a saved U field at or bracketing the start time.')
@@ -304,10 +298,15 @@ def preflight(case, config, preview=False):
     else:
         if len(saved) < 2 or saved[0][0] > config.start_time+1e-10 or saved[-1][0] < config.end_time-1e-10:
             raise ValueError('Saved U snapshots must cover the tracking interval. Select frozen flow explicitly to replay one snapshot.')
-        selected = [p for _,p in saved]
+        # Only frames used for this replay need its phase field. Old or future
+        # snapshots outside the bracketing interval are never sampled natively.
+        times=[t for t,_ in saved]
+        lower=max(0,bisect_right(times,config.start_time)-1)
+        upper=min(len(saved)-1,bisect_left(times,config.end_time))
+        selected = [p for _,p in saved[lower:upper+1]]
     if config.alpha_field != 'none' and any(not (p/config.alpha_field).is_file()
             and not (p/(config.alpha_field+'.gz')).is_file() for p in selected):
-        raise ValueError(f'Save {config.alpha_field} at every carrier U time, or select fully submerged single-phase flow.')
+        raise ValueError(f'Save {config.alpha_field} at every carrier U time used by this replay, or select fully submerged single-phase flow.')
     if (case/'postProcessing/largeTracers'/config.run_name).exists():
         raise ValueError('Output already exists. Choose a new run name.')
 

@@ -123,3 +123,34 @@ def test_particle_workflow_save_does_not_change_carrier(qapp,dialogs,tmp_path):
     window.workflow.setCurrentIndex(0)
     assert not window.particle_workflow and window.run_button.text().startswith('Save plan')
     window.close()
+
+
+@pytest.mark.parametrize('keyword',['scale','convertToMeters'])
+def test_carrier_inspection_converts_mesh_coordinates_to_metres(tmp_path,keyword):
+    generate_demo(tmp_path)
+    path=tmp_path/'system/blockMeshDict'
+    path.write_text(path.read_text().replace('convertToMeters 1;',f'{keyword} .001;'))
+    report=inspect_carrier(tmp_path)
+    assert report.bounds==((0,0,-.0002),(.003,.0005,.001))
+    cfg=suggested_placement(TracerConfig(),report,'buoyant',.0005)
+    assert 0<cfg.seed_max[0]<.003 and 0<cfg.seed_max[2]<.0005
+
+
+def test_replay_checks_only_phase_fields_in_its_actual_interval(tmp_path):
+    generate_demo(tmp_path)
+    mesh=tmp_path/'constant/polyMesh'; mesh.mkdir(); (mesh/'points').touch()
+    for t in ('1','1.5','2','3'):
+        folder=tmp_path/t; folder.mkdir(); (folder/'U').touch()
+        if t!='3': (folder/'alpha.water').touch()
+    (tmp_path/'0/alpha.water').unlink()
+    preflight(tmp_path,replace(TracerConfig(),start_time=1,end_time=2))
+    with pytest.raises(ValueError,match='alpha.water'):
+        preflight(tmp_path,replace(TracerConfig(),start_time=.5,end_time=2))
+
+
+def test_duplicate_numeric_carrier_times_are_rejected(tmp_path):
+    generate_demo(tmp_path)
+    mesh=tmp_path/'constant/polyMesh'; mesh.mkdir(); (mesh/'points').touch()
+    (tmp_path/'0.0').mkdir(); (tmp_path/'0.0/U').touch()
+    with pytest.raises(ValueError,match='unique numeric'):
+        preflight(tmp_path,replace(TracerConfig(),frozen_flow=True))

@@ -38,6 +38,11 @@ or dictionaries with generated vertices, enter the seed box manually. The native
 initialization preview checks the actual mesh, wall clearance, water fraction
 and particle overlaps, rather than trusting the bounding box.
 
+Literal bounds honor `scale` and `convertToMeters` and are reported in metres.
+Transient tracking checks the phase fields in its bracketing time interval;
+unrelated older/future snapshots need not contain that field. Numeric time
+directory aliases such as both `0` and `0.0` must be resolved before replay.
+
 The water elevation here assists seed-box suggestions. It does not initialize
 or change the carrier's water level. Use the carrier setup/`setFields` workflow
 for that. A 0.5 m scour-demo depth has water and air in the mesh and a moving VOF

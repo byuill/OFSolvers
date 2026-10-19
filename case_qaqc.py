@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import shutil
 
-from foam_io import boundary_patches, entries, scalar, value
+from foam_io import boundary_patches, entries, scalar, value, foam_path, read_foam_text
 
 SOLVERS = ('interFoam', 'multiphaseEulerFoam', 'buoyantBoussinesqPimpleFoam',
            'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'sedimentInterFoam')
@@ -59,6 +59,9 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*',solver):
         result.errors.append('Select a solver executable name, without paths or arguments.')
         return result
+    if type(cores) is not int or cores<1:
+        result.errors.append('MPI rank count must be a positive integer.')
+        return result
     case = Path(case_dir).expanduser().resolve() if case_dir else None
     if case is None or not case.is_dir():
         result.errors.append('Select an existing OpenFOAM case folder.')
@@ -76,16 +79,19 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
         application = value(control, 'application')
         if application != solver:
             result.errors.append(f'Case application is {application}; selected solver is {solver}.')
-        result.time_directory = start_directory(case, control)
-        if scalar(control, 'endTime') <= float(result.time_directory):
+        if cores==1:
+            result.time_directory = start_directory(case, control)
+        end_time=scalar(control, 'endTime')
+        if cores==1 and end_time <= float(result.time_directory):
             result.errors.append('endTime must be later than the selected initial/restart time.')
         if scalar(control, 'deltaT') <= 0 or scalar(control, 'writeInterval') <= 0:
             result.errors.append('deltaT and writeInterval must be positive.')
     except (ValueError, OSError) as exc:
         result.errors.append(f'controlDict: {exc}')
+        return result
     patches = []
     for name in ('points', 'faces', 'owner', 'neighbour', 'boundary'):
-        if not (case/'constant/polyMesh'/name).is_file():
+        if not foam_path(case/'constant/polyMesh'/name).is_file():
             result.errors.append(f'Missing mesh file constant/polyMesh/{name}; run mesh generation first.')
     if not any('Missing mesh file' in e for e in result.errors):
         try:
@@ -133,14 +139,14 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
             result.errors.append(f'turbulenceProperties: {exc}')
     if result.time_directory:
         for name in fields:
-            path = case/result.time_directory/name
+            path = foam_path(case/result.time_directory/name)
             if not path.is_file():
                 result.errors.append(f'Missing {result.time_directory}/{name}.')
                 continue
             if not patches:
                 continue
             try:
-                field_text = path.read_text()
+                field_text = read_foam_text(path)
                 if solver == 'sedimentInterFoam' and name == 'alpha.water' and (case/'flume.json').is_file():
                     uniform = re.search(r'\binternalField\s+uniform\s+([^;]+);',field_text)
                     if uniform and float(uniform[1]) == 0:
@@ -157,7 +163,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                 if name in dimensions:
                     actual_dimensions = [float(v) for v in value(field_text,'dimensions').strip('[]').split()]
                     if actual_dimensions != dimensions[name]:
-                        result.errors.append(f'{path.name} has incorrect physical dimensions.')
+                        result.errors.append(f'{name} has incorrect physical dimensions.')
                 boundaries = value(field_text, 'boundaryField')[1:-1]
                 boundary_entries = entries(boundaries)
                 for patch in patches:
@@ -211,7 +217,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
         rank_times = []
         for rank in range(cores):
             folder = case/f'processor{rank}'
-            if not (folder/'constant/polyMesh/boundary').exists():
+            if not foam_path(folder/'constant/polyMesh/boundary').exists():
                 result.errors.append(f'Missing processor{rank} mesh; decompose with the selected rank count.')
             try:
                 rank_time = start_directory(folder, control)
@@ -219,7 +225,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                 if scalar(control,'endTime') <= float(rank_time):
                     result.errors.append(f'endTime must be later than processor{rank} restart time {rank_time}.')
                 for name in fields:
-                    if not (folder/rank_time/name).is_file():
+                    if not foam_path(folder/rank_time/name).is_file():
                         result.errors.append(f'Missing processor{rank}/{rank_time}/{name}.')
                 if solver == 'sandParcelPimpleFoam' and float(rank_time) > 0:
                     metadata = folder/rank_time/'uniform/lagrangian/sandCloud'

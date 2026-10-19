@@ -217,3 +217,19 @@ def test_nonuniform_vector_preflight_keeps_boundary_checks(tmp_path):
         'internalField nonuniform List<vector> 2 ((0.3 0 0) (0.3 0 0));'))
     report = check_case(tmp_path,'sedimentPimpleFoam',check_programs=False)
     assert report.ok, report.errors
+
+
+@pytest.mark.parametrize('preset',['castle','scour'])
+@pytest.mark.parametrize('compressed',[False,True])
+def test_generated_mesh_scripts_preserve_existing_mesh(tmp_path,preset,compressed):
+    import subprocess
+    from scour_tracer_demo import generate_demo
+    if preset=='castle': generate_case(tmp_path)
+    else: generate_demo(tmp_path)
+    mesh=tmp_path/'constant/polyMesh'; mesh.mkdir()
+    path=mesh/('points.gz' if compressed else 'points'); path.write_bytes(b'preserve mesh')
+    before=(tmp_path/'0/U').read_bytes()
+    result=subprocess.run(['sh','./Allmesh'],cwd=tmp_path,capture_output=True,text=True)
+    assert result.returncode!=0 and 'A mesh already exists' in result.stderr
+    assert path.read_bytes()==b'preserve mesh' and (tmp_path/'0/U').read_bytes()==before
+    assert not (tmp_path/'log.blockMesh').exists()

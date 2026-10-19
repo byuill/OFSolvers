@@ -436,6 +436,49 @@ for name,rule in [('unknown','missing { type contact; }'),('type','bed { type in
     assert not folder.exists()
 print('PASS invalid native particle boundary rules rejected before output',flush=True)
 
+# Weak drag must tend continuously to a ballistic trajectory, without
+# subtracting enormous equilibrium-velocity displacement terms.
+c=box('ballistic-limit')
+cfg=config(rho_water=1e-20,mu_water=1e-20,added_mass=0,
+    end_time=.1,output_interval=.1)
+a=run(c,cfg)
+expected=.3-.5*9.81*.1**2
+assert abs(a[-1,4]-expected)<1e-12 and abs(a[-1,7]+.981)<1e-12
+RESULTS['ballistic_position_error_m']=float(abs(a[-1,4]-expected))
+print('PASS weak-drag ballistic limit without cancellation',flush=True)
+
+# Full replay uses only its bracketing fields, even at the final output time;
+# unrelated earlier/later U snapshots need not have this replay's alpha field.
+c=box('interval-only-phase',u=(.2,0,0))
+for time in ('1','1.5','2','3'):
+    folder=c/time; folder.mkdir(); shutil.copyfile(c/'0/U',folder/'U')
+    if time!='3':
+        (folder/'alpha.water').write_text(field('alpha.water','[0 0 0 0 0 0 0]','1',
+            {p:'type zeroGradient;' for p in ('upstream','downstream','bed','lid','sides')}))
+cfg=config(start_time=1,end_time=2,output_interval=.5,frozen_flow=False,
+    initial_velocity='flow',density=Distribution('constant',low=1000),alpha_field='alpha.water')
+a=run(c,cfg)
+assert abs(a[-1,2]-.5)<1e-10
+text=(c/'log.tracers01').read_text()
+assert 'Carrier bracket: 1 .. 1.5' in text and 'Carrier bracket: 1.5 .. 2' in text
+print('PASS replay brackets and phase coverage limited to tracking interval',flush=True)
+
+# An event-time remainder smaller than minDeltaT is safe when the physical
+# timestep limits still permit it. Previously this failed at a carrier frame.
+c=box('short-frame-remainder',u=(.2,0,0))
+for time in ('0.0100000001','0.02','0.03'):
+    (c/time).mkdir(); shutil.copyfile(c/'0/U',c/time/'U')
+a=run(c,config(end_time=.03,output_interval=.03,max_delta_t=.005,frozen_flow=False,
+    initial_velocity='flow',density=Distribution('constant',low=1000)))
+assert abs(a[-1,2]-.306)<1e-10
+print('PASS short carrier snapshot remainder without false stiffness failure',flush=True)
+
+c=box('duplicate-numeric-times')
+shutil.copytree(c/'0',c/'0.0')
+folder=run(c,config(),success=False)
+assert not folder.exists() and 'unique increasing numeric values' in (c/'log.tracers01').read_text()
+print('PASS aliased carrier times rejected before output',flush=True)
+
 (WORK/'results.json').write_text(json.dumps(RESULTS,indent=2)+'\n')
 print(json.dumps(RESULTS,indent=2))
 print('All native tracer checks passed. Artifacts:',WORK,flush=True)

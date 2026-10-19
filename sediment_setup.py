@@ -5,7 +5,7 @@ import re
 import shutil
 
 from foam_io import (boundary_patches, entries, value, update_values, update_nested,
-                     replace_block, write_case_files)
+                     replace_block, write_case_files, foam_path)
 from openfoam_dict_parser import OpenFoamDictParser
 from case_qaqc import start_directory
 
@@ -25,7 +25,7 @@ def create_starter(case_dir, solver):
 
 
 def case_patches(case_dir):
-    path = Path(case_dir)/'constant/polyMesh/boundary'
+    path = foam_path(Path(case_dir)/'constant/polyMesh/boundary')
     if path.exists():
         return boundary_patches(path)
     # A fresh copied blockMesh tutorial has not generated polyMesh yet.

@@ -254,6 +254,10 @@ RAS { RASModel kOmegaSST; turbulence on; printCoeffs on; }
         files['Allmesh'] = '''#!/bin/sh
 set -eu
 cd "$(dirname "$0")"
+if [ -e constant/polyMesh/points ] || [ -e constant/polyMesh/points.gz ]; then
+    echo 'A mesh already exists. Use a fresh case or preserve results and remove the mesh deliberately before remeshing.' >&2
+    exit 1
+fi
 blockMesh > log.blockMesh 2>&1
 surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1
 snappyHexMesh -overwrite > log.snappyHexMesh 2>&1

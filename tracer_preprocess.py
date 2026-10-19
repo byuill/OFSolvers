@@ -4,7 +4,7 @@ from pathlib import Path
 import math
 import re
 
-from foam_io import value, boundary_patches
+from foam_io import value, boundary_patches, entries, scalar
 from large_tracer import Distribution
 
 
@@ -24,7 +24,10 @@ def numeric_times(case):
         except ValueError: continue
         if math.isfinite(t) and p.is_dir() and ((p/'U').is_file() or (p/'U.gz').is_file()):
             result.append((t,p))
-    return sorted(result)
+    result.sort()
+    if any(a[0]==b[0] for a,b in zip(result,result[1:])):
+        raise ValueError('Carrier time directories must have unique numeric values; remove aliases such as 0 and 0.0.')
+    return result
 
 
 def _number(text,name):
@@ -64,9 +67,16 @@ def inspect_carrier(case):
         alpha.update(p.name.removesuffix('.gz') for p in folder.glob('alpha.*') if p.is_file())
     bounds=None; notes=[]
     try:
-        vertices=value((case/'system/blockMeshDict').read_text(encoding='utf-8'),'vertices')
+        block=(case/'system/blockMeshDict').read_text(encoding='utf-8')
+        vertices=value(block,'vertices')
         points=[_vector('('+v+')') for v in re.findall(r'\(([^()]+)\)',vertices)]
         if not points: raise ValueError('No literal block vertices')
+        keys=entries(block)
+        # v1912 prefers scale and accepts the legacy convertToMeters alias.
+        scale_key=next((key for key in ('scale','convertToMeters') if key in keys),None)
+        factor=scalar(block,scale_key) if scale_key else 1
+        if factor<=0: factor=1  # v1912 treats nonpositive scale as no scaling.
+        points=[tuple(factor*x for x in p) for p in points]
         bounds=(tuple(min(p[k] for p in points) for k in range(3)),
                 tuple(max(p[k] for p in points) for k in range(3)))
         notes.append('Extents come from blockMesh vertices; initialization preview checks the actual mesh and water field.')

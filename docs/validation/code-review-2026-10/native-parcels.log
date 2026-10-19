@@ -1,0 +1,15 @@
+Validation artifacts: <TEMP>
+PASS: feed rate, exact strip width, random uniform heights and width
+PASS: parcel ages, advection and gravity/drag settling match exact uniform-flow trajectories
+PASS: Rouse exponent and sampled CDF agree with independent integration
+PASS: local bed-stress shear estimate updates during PIMPLE flow
+PASS: low-rate fractional final batch retains all requested feed mass
+PASS: delayed start and duration not aligned to time steps
+PASS: restart preserves feed mass, sample sequence and particle trajectories
+PASS: two-rank feed, processor migration, outlet escape and cloud reconstruction
+PASS: inlet split across two ranks respects the global feed rate
+PASS: RANS local shear and native stochastic particle dispersion
+PASS: native stick bed retains deposited sand mass
+PASS: feed rectangle extending off the inlet is rejected
+PASS: missing injector restart state is rejected
+All parcel integration checks passed.

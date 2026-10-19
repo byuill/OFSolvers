@@ -63,6 +63,13 @@ The preprocessing widgets can run without OpenFOAM, provided Python/Qt/VTK
 and a display work. Mesh checks and simulations require the native executables.
 Activate **OpenCFD v1912** before launching the GUI to use the sediment solvers.
 
+Case preflight and the fluid boundary editor accept gzip-compressed ASCII
+mesh/field files. Fluid edits preserve compression and back up the original
+bytes. VOF **Atmosphere** conditions prescribe physical total pressure using
+`prghTotalPressure`, including its hydrostatic conversion to `p_rgh`.
+Generated castle/scour meshing scripts refuse an existing mesh; use a fresh case
+for a new mesh, or preserve results before deliberately removing the old mesh.
+
 ## First sediment case
 
 1. Create an empty results folder outside the source checkout. Click

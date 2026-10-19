@@ -65,3 +65,8 @@ The guides, solver sources and tutorials are versioned together in this reposito
 Compiled executables are built locally; generated case results are separate from
 the source checkout. The OpenFOAM solver code is GPL-3.0-or-later; see each solver's
 `COPYING` file.
+
+The [October 2026 code review](docs/code-review-2026-10.md) records numerical and
+operational fixes, regression results, performance measurements and remaining
+model limits. GitHub Actions checks the Python workbench; native solver checks
+are available in `tests/openfoam/` for an activated v1912 installation.

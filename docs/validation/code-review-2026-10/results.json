@@ -1,0 +1,26 @@
+{
+  "python_tests": 123,
+  "native_check_groups": {
+    "eulerian": 14,
+    "parcels": 13,
+    "resuspension": 8,
+    "large_tracers": 29,
+    "flow_workbench": 5,
+    "tracer_workbench": 1,
+    "operations": 4
+  },
+  "benchmark": {
+    "records": 199800,
+    "shape": [
+      200,
+      999,
+      11
+    ],
+    "previous_seconds": 7.199014728998009,
+    "revised_seconds": 1.0597715550029534,
+    "previous_peak_rss_mib": 260.94921875,
+    "revised_peak_rss_mib": 76.21875,
+    "arrays_identical": true,
+    "state_array_sha256": "41da0c1967835d07bf89c28337077879590fb10ae2efaeb684412d562ed44e0c"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "neutral_advection_position_error_m": 1.7208456881689926e-15,
+  "stokes_velocity_relative_error": 2.0419160506084652e-05,
+  "terminal_rise_relative_error": 0.0025833949680185986,
+  "accelerating_flow_velocity_error_m_s": 3.3346887495788735e-07,
+  "time_step_refinement_error_ratio": 0.24852278178601234,
+  "floating_water_fraction_mean": 0.49944042726336163,
+  "floating_equilibrium_water_fraction": 0.499399279134962,
+  "diameter_cutoff_modes": {
+    "above": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "equal": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "below": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "all": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "off": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "legacy-on": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "legacy-off": {
+      "eligible": 0,
+      "bounced": false
+    }
+  },
+  "mixed_size_pair": {
+    "diameters_m": [
+      0.1,
+      0.04
+    ],
+    "large_only_final_vx": [
+      0.1999999999207967,
+      -0.1999999998020001
+    ],
+    "all_final_vx": [
+      0.1518796992023487,
+      0.5518796983841087
+    ]
+  },
+  "inelastic_pair_energy_ratio": 0.08999999995765902,
+  "frictional_pair": {
+    "sticking": {
+      "normal_restitution": 0.2999999999998986,
+      "tangential_to_normal_impulse_ratio": 0.12191386479371555,
+      "kinetic_energy_ratio": 0.23689395111145284
+    },
+    "sliding": {
+      "normal_restitution": 0.2999999999998989,
+      "tangential_to_normal_impulse_ratio": 0.05000000000013311,
+      "kinetic_energy_ratio": 0.26028617604926346
+    }
+  },
+  "ballistic_position_error_m": 1.1102230246251565e-16
+}

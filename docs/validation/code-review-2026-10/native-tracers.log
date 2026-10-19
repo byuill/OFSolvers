@@ -1,0 +1,98 @@
+Validation artifacts: <TEMP>
+PASS neutral advection and unchanged carrier fields
+PASS analytical Stokes response including added mass
+PASS buoyant terminal rise
+PASS transient field interpolation and fluid acceleration
+PASS timestep refinement in accelerating flow
+PASS partial submergence and floating equilibrium
+PASS finite-radius bed contact
+PASS rolling contact and rotational state
+PASS nonoverlapping bed seeding on a sloping surface
+PASS sphere collision momentum and energy
+PASS retained-region exit and open-boundary escape
+PASS impossible initial geometry fails atomically
+PASS overlapping initialization and transient extrapolation rejected
+PASS deterministic populations and output protection
+PASS 999 independent physical particles
+PASS strict diameter cutoff, all/off modes and legacy dictionaries
+PASS large-small pass-through and unequal-mass all-mode collision
+PASS sediment normal restitution and energy dissipation
+PASS sediment sliding friction, normal restitution, spin and energy loss
+PASS below-threshold settling and finite-radius bed contact
+PASS invalid native cutoff settings rejected before output
+PASS per-patch contact, restitution, friction and escape independent of carrier BCs
+PASS initialization-only preview, unique outputs and unchanged initial carrier
+PASS preview at interpolated transient start time
+PASS invalid native particle boundary rules rejected before output
+PASS weak-drag ballistic limit without cancellation
+PASS replay brackets and phase coverage limited to tracking interval
+PASS short carrier snapshot remainder without false stiffness failure
+PASS aliased carrier times rejected before output
+{
+  "neutral_advection_position_error_m": 1.7208456881689926e-15,
+  "stokes_velocity_relative_error": 2.0419160506084652e-05,
+  "terminal_rise_relative_error": 0.0025833949680185986,
+  "accelerating_flow_velocity_error_m_s": 3.3346887495788735e-07,
+  "time_step_refinement_error_ratio": 0.24852278178601234,
+  "floating_water_fraction_mean": 0.49944042726336163,
+  "floating_equilibrium_water_fraction": 0.499399279134962,
+  "diameter_cutoff_modes": {
+    "above": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "equal": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "below": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "all": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "off": {
+      "eligible": 0,
+      "bounced": false
+    },
+    "legacy-on": {
+      "eligible": 2,
+      "bounced": true
+    },
+    "legacy-off": {
+      "eligible": 0,
+      "bounced": false
+    }
+  },
+  "mixed_size_pair": {
+    "diameters_m": [
+      0.1,
+      0.04
+    ],
+    "large_only_final_vx": [
+      0.1999999999207967,
+      -0.1999999998020001
+    ],
+    "all_final_vx": [
+      0.1518796992023487,
+      0.5518796983841087
+    ]
+  },
+  "inelastic_pair_energy_ratio": 0.08999999995765902,
+  "frictional_pair": {
+    "sticking": {
+      "normal_restitution": 0.2999999999998986,
+      "tangential_to_normal_impulse_ratio": 0.12191386479371555,
+      "kinetic_energy_ratio": 0.23689395111145284
+    },
+    "sliding": {
+      "normal_restitution": 0.2999999999998989,
+      "tangential_to_normal_impulse_ratio": 0.05000000000013311,
+      "kinetic_energy_ratio": 0.26028617604926346
+    }
+  },
+  "ballistic_position_error_m": 1.1102230246251565e-16
+}
+All native tracer checks passed. Artifacts: <TEMP>

@@ -166,3 +166,21 @@ def test_plots_replay_and_persistent_ids(tmp_path,with_eligibility):
     assert (out/'trajectories.png').stat().st_size>1000
     assert '__DATA__' not in (out/'replay.html').read_text()
     assert json.loads((out/'outcomes.json').read_text())['mobilized']==2
+
+
+@pytest.mark.parametrize('fault',['duplicate','missing','fractional_id','changed_density','nonfinite','invalid_flag'])
+def test_track_loader_rejects_corrupt_completed_data(tmp_path,fault):
+    run=tmp_path/'tracks'; run.mkdir(); (run/'complete').touch()
+    columns=['time','id','x','y','z','vx','vy','vz','active','mobilized','left_region','crossed_rim','diameter','density','inside_region']
+    rows=[dict(time=t,id=i,x=0,y=0,z=.3,vx=0,vy=0,vz=0,active=1,mobilized=0,
+               left_region=0,crossed_rim=0,diameter=.03,density=700,inside_region=1)
+          for t in (0,1) for i in (0,1)]
+    if fault=='duplicate': rows.append(dict(rows[0]))
+    elif fault=='missing': rows.pop()
+    elif fault=='fractional_id': rows[-1]['id']=.5
+    elif fault=='changed_density': rows[-1]['density']=701
+    elif fault=='nonfinite': rows[-1]['z']=float('nan')
+    elif fault=='invalid_flag': rows[-1]['active']=2
+    with (run/'tracks.csv').open('w') as stream:
+        writer=csv.DictWriter(stream,fieldnames=columns); writer.writeheader(); writer.writerows(rows)
+    with pytest.raises(ValueError): load_tracks(run)

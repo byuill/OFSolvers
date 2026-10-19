@@ -115,7 +115,17 @@ regions (
  boxToFace {{ box (-1 -1 -1) (4 1 .5); fieldValues (volScalarFieldValue alpha.water 1 volScalarFieldValue p_rgh 4910.886); }}
 );
 ''',
-        'Allmesh': '#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\nblockMesh > log.blockMesh 2>&1\ncheckMesh > log.checkMesh 2>&1\nsetFields > log.setFields 2>&1\n',
+        'Allmesh': '''#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+if [ -e constant/polyMesh/points ] || [ -e constant/polyMesh/points.gz ]; then
+    echo 'A mesh already exists. Use a fresh case or preserve results and remove the mesh deliberately before remeshing.' >&2
+    exit 1
+fi
+blockMesh > log.blockMesh 2>&1
+checkMesh > log.checkMesh 2>&1
+setFields > log.setFields 2>&1
+''',
         'Allrun': '#!/bin/sh\nset -eu\ncd "$(dirname "$0")"\n./Allmesh\ninterFoam > log.interFoam 2>&1\nlargeTracerFoam > log.largeTracerFoam 2>&1\n',
         'scour-demo.json': json.dumps(dict(velocity=velocity,end_time=end_time,coarse=coarse,
             description='Fixed scour hole; 0.5 m water above rim; water/air VOF. Laminar demonstration, not a calibrated scour prediction.'),indent=2)+'\n',

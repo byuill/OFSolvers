@@ -78,6 +78,9 @@ public:
             if (u.typeHeaderOk<volVectorField>(true)) times_.push_back(all[i]);
         }
         requireTracer(!times_.empty(),"No saved carrier U fields found");
+        for (label i=1;i<label(times_.size());++i)
+            requireTracer(times_[i].value()>times_[i-1].value(),
+                "Carrier time directories must have unique increasing numeric values (e.g. do not keep both 0 and 0.0)");
         bool previewSnapshot=false;
         if (preview && !frozen_)
             for (const auto& t:times_) if (mag(t.value()-start)<1e-9)
@@ -90,9 +93,19 @@ public:
             {times_={t}; found=true; break;}
             requireTracer(found,"Frozen flowTime must match a saved U time");
         }
-        else requireTracer(times_.size()>=2 && start>=times_.front().value()-1e-10
-            && (preview ? start : end)<=times_.back().value()+1e-10,
-            "Transient tracking needs >=2 saved U times covering the entire tracking interval. Use frozenFlow explicitly for one snapshot.");
+        else
+        {
+            requireTracer(times_.size()>=2 && start>=times_.front().value()-1e-10
+                && (preview ? start : end)<=times_.back().value()+1e-10,
+                "Transient tracking needs >=2 saved U times covering the entire tracking interval. Use frozenFlow explicitly for one snapshot.");
+            // Retain the requested interval and its brackets. In particular,
+            // output at endTime must not load an unrelated later phase field.
+            label first=0, last=0;
+            while (first+2<label(times_.size()) && times_[first+1].value()<=start) ++first;
+            last=first+1;
+            while (last+1<label(times_.size()) && times_[last].value()<(preview ? start : end)) ++last;
+            times_=std::vector<instant>(times_.begin()+first,times_.begin()+last+1);
+        }
         update(start);
     }
     label cell(const point& x) const {return search_.findCell(x);}
@@ -102,11 +115,11 @@ public:
     }
     void update(scalar time)
     {
-        label k=0;
+        label k=bracket_>=0 && time>=times_[bracket_].value() ? bracket_ : 0;
         if (!frozen_) while (k+2<label(times_.size()) && time>=times_[k+1].value()-1e-12) ++k;
         if (k==bracket_) return;
-        b_.reset(); a_.reset();
-        a_.reset(new TracerFrame(mesh_,times_[k].name(),alphaName_));
+        if (k==bracket_+1 && b_) a_=std::move(b_);
+        else {b_.reset(); a_.reset(new TracerFrame(mesh_,times_[k].name(),alphaName_));}
         if (!frozen_) b_.reset(new TracerFrame(mesh_,times_[k+1].name(),alphaName_));
         bracket_=k;
         Info<< "Carrier bracket: " << times_[k].name();

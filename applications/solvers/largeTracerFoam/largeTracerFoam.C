@@ -308,50 +308,49 @@ int main(int argc,char *argv[])
     scalar t=start, nextOutput=min(end,start+outputDt);
     label steps=0, maxSteps=cfg.lookupOrDefault<label>("maxSteps",10000000);
     requireTracer(maxSteps>0,"maxSteps must be positive");
+    // Reuse integration and broad-phase storage across substeps.
+    std::vector<vector> acceleration(particles.size(),Zero);
+    std::vector<scalar> rate(particles.size(),0);
+    std::vector<label> order;
+    order.reserve(count);
     while (t<end-1e-12)
     {
         requireTracer(++steps<=maxSteps,"Exceeded maxSteps; tracking stopped without a completion marker");
         carrier.update(t);
-        scalar dt=min(maxDt,min(nextOutput-t,carrier.nextTime()-t));
-        std::vector<vector> target(particles.size(),Zero), forcing(particles.size(),Zero);
-        std::vector<scalar> beta(particles.size(),0), inertia(particles.size(),0);
+        const scalar eventDt=min(nextOutput-t,carrier.nextTime()-t);
+        scalar dt=min(maxDt,eventDt);
         for (auto& p:particles) if (p.active)
         {
             auto s=carrier.sample(p.x,p.d/2,t); p.water=s.water;
             scalar f=s.water, displaced=p.volume*(f*rhoW+(1-f)*rhoA);
             scalar bw=f*tracerDrag(p.d,rhoW,muW,mag(s.uw-p.v));
             scalar ba=(1-f)*tracerDrag(p.d,rhoA,muA,mag(s.ua-p.v));
-            beta[p.id]=bw+ba;
-            target[p.id]=(bw*s.uw+ba*s.ua)/beta[p.id];
-            inertia[p.id]=p.mass+added*displaced;
-            forcing[p.id]=(p.mass-displaced)*g+(1+added)*p.volume*(f*rhoW*s.aw+(1-f)*rhoA*s.aa);
-            vector acceleration=(beta[p.id]*(target[p.id]-p.v)+forcing[p.id])/inertia[p.id];
+            const scalar beta=bw+ba, inertia=p.mass+added*displaced;
+            const vector forcing=(p.mass-displaced)*g+(1+added)*p.volume*(f*rhoW*s.aw+(1-f)*rhoA*s.aa);
+            acceleration[p.id]=(bw*(s.uw-p.v)+ba*(s.ua-p.v)+forcing)/inertia;
+            rate[p.id]=beta/inertia;
             scalar length=displacementCo*p.d/2;
             dt=min(dt,length/max(mag(p.v),scalar(1e-9)));
-            dt=min(dt,std::sqrt(2*length/max(mag(acceleration),scalar(1e-9))));
-            dt=min(dt,0.2*inertia[p.id]/beta[p.id]);
+            dt=min(dt,std::sqrt(2*length/max(mag(acceleration[p.id]),scalar(1e-9))));
+            dt=min(dt,0.2/rate[p.id]);
         }
-        requireTracer(dt>=minDt || (nextOutput-t<minDt && dt>0),"Required timestep below minDeltaT; reduce stiffness/sizes or lower minDeltaT");
+        // A short remainder to a snapshot/output time is not a stiffness
+        // failure. The physical limits above must still permit that remainder.
+        requireTracer(dt>=minDt || (eventDt<minDt && dt==eventDt && dt>0),"Required timestep below minDeltaT; reduce stiffness/sizes or lower minDeltaT");
         requireTracer(std::isfinite(dt) && dt>0,"Invalid tracer timestep");
         for (auto& p:particles) if (p.active)
         {
-            // Exact velocity update for frozen linearized drag over this substep.
-            scalar rate=beta[p.id]/inertia[p.id], q=-std::expm1(-rate*dt);
-            vector equilibrium=target[p.id]+forcing[p.id]/beta[p.id];
-            vector old=p.v;
-            p.v+=q*(equilibrium-p.v);
+            advanceTracer(p,acceleration[p.id],rate[p.id],dt);
             scalar mu=p.water*muW+(1-p.water)*muA;
             p.omega*=std::exp(-8*constant::mathematical::pi*mu*pow3(p.d/2)*dt
                 /(0.4*p.mass*sqr(p.d/2)));
-            // Exact integral of that velocity (not forward Euler position).
-            p.x+=equilibrium*dt+(old-equilibrium)*(q/rate);
         }
         for (label iteration=0;iteration<contactIterations;++iteration)
         {
             scalar penetration=0;
             for (auto& p:particles) if (p.active) for (const auto& wall:walls)
                 penetration=max(penetration,wall->contact(p));
-            std::vector<label> order;
+            order.clear();
             if (collisions)
             {
                 for (label i=0;i<count;++i) if (particles[i].active && particles[i].pairContactEligible) order.push_back(i);

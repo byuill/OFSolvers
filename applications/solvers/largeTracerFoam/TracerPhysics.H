@@ -101,6 +101,27 @@ inline scalar tracerDrag(scalar d, scalar rho, scalar mu, scalar slip)
     return 0.5*rho*0.44*(constant::mathematical::pi*sqr(d)/4)*slip;
 }
 
+// Exact frozen-drag integration, expressed using acceleration at the start of
+// the step. Avoid F/beta and subtraction of large terminal-velocity terms:
+// both lose precision as drag tends to zero (the ballistic limit).
+inline void advanceTracer(Tracer& p, const vector& acceleration, scalar rate, scalar dt)
+{
+    const scalar h=rate*dt;
+    scalar phi1, phi2;
+    if (h<1e-3)
+    {
+        phi1=1+h*(-0.5+h*(1.0/6+h*(-1.0/24+h/120)));
+        phi2=0.5+h*(-1.0/6+h*(1.0/24+h*(-1.0/120+h/720)));
+    }
+    else
+    {
+        phi1=-std::expm1(-h)/h;
+        phi2=(1-phi1)/h;
+    }
+    p.x+=p.v*dt+acceleration*(sqr(dt)*phi2);
+    p.v+=acceleration*(dt*phi1);
+}
+
 // Rigid-sphere contact impulse. Normal points from b toward a. Infinite-mass
 // stationary wall if b==nullptr. Rotational inertia is 2/5*m*R^2.
 inline void tracerImpulse(Tracer& a, Tracer* b, const vector& n, scalar e, scalar friction)

@@ -15,6 +15,26 @@ import gzip
 _TOKEN = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[{}();]|[^\s{}();"]+', re.S)
 
 
+def foam_path(path):
+    """Resolve OpenFOAM's uncompressed-first, gzip-fallback file lookup."""
+    path = Path(path)
+    compressed = path.with_name(path.name+'.gz')
+    return compressed if not path.is_file() and compressed.is_file() else path
+
+
+def read_foam_text(path):
+    path = foam_path(path)
+    if path.suffix == '.gz':
+        with gzip.open(path, 'rt', encoding='utf-8') as stream:
+            return stream.read()
+    return path.read_text(encoding='utf-8')
+
+
+def encode_foam_text(path, text):
+    """Keep a compressed target compressed when writing edited ASCII data."""
+    return gzip.compress(text.encode('utf-8'), mtime=0) if Path(path).suffix == '.gz' else text
+
+
 def tokens(text):
     return [m for m in _TOKEN.finditer(text) if not m[0].startswith(('//', '/*'))]
 
@@ -138,11 +158,7 @@ def update_nested(text, path, updates):
 
 
 def boundary_patches(path):
-    path = Path(path)
-    if path.suffix=='.gz':
-        with gzip.open(path,'rt',encoding='utf-8') as stream: text=stream.read()
-    else:
-        text = path.read_text(encoding='utf-8')
+    text = read_foam_text(path)
     items = tokens(text)
     # Skip the FoamFile dictionary before the numbered patch list.
     i = 0

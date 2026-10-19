@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFormLayout)
 
 from case_qaqc import SOLVERS, check_case, mesh_passed
-from foam_io import write_case_files
+from foam_io import write_case_files, foam_path
 
 
 class OpenFOAMWorker(QThread):
@@ -247,7 +247,7 @@ class ExecutionTab(QWidget):
         if not self.case_dir or not (Path(self.case_dir)/'system/blockMeshDict').exists():
             self.append_log('Select a case with system/blockMeshDict first.')
             return
-        if (Path(self.case_dir)/'constant/polyMesh/faces').exists():
+        if any(foam_path(Path(self.case_dir)/'constant/polyMesh'/name).exists() for name in ('points','faces')):
             self.append_log('A mesh already exists. Regenerate deliberately outside the GUI after preserving results.')
             return
         self.execute_command(['blockMesh'], 'mesh')

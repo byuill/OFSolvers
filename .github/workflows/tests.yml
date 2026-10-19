@@ -1,0 +1,34 @@
+name: Workbench tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12']
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: 'requirements-*.txt'
+      - name: Install headless graphics libraries
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libopengl0
+      - name: Install workbench and terrain dependencies
+        run: python -m pip install -r requirements-terrain.txt pytest
+      - name: Check Python sources and run regression suite
+        run: |
+          python -m compileall -q .
+          python -m pytest -q

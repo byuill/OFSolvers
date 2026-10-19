@@ -244,3 +244,58 @@ def test_execution_uses_selected_case_and_plain_text(qapp,tmp_path):
     wait(qapp,lambda:tab.worker is None)
     assert str(tmp_path) in tab.console.toPlainText() and '<b>plain output</b>' in tab.console.toPlainText()
     assert tab.btn_run.isEnabled() and not tab.btn_stop.isEnabled()
+
+
+def test_compressed_mesh_fields_preflight_and_boundary_edit(tmp_path,qapp,dialogs):
+    import gzip
+    from boundary_tab import BoundaryTab
+    from foam_io import read_foam_text
+    case=prepared_case(tmp_path)
+    before=(case/'0/U').read_text()
+    for folder in (case/'constant/polyMesh',case/'0'):
+        for path in list(folder.iterdir()):
+            path.with_name(path.name+'.gz').write_bytes(gzip.compress(path.read_bytes()))
+            path.unlink()
+    report=check_case(case,'sedimentPimpleFoam',check_programs=False)
+    assert report.ok,report.errors
+    assert case_patches(case)[0]['name']=='upstream'
+    tab=BoundaryTab(); tab.set_case_directory(str(case)); tab.set_solver_profile('sedimentPimpleFoam')
+    tab.import_patches_from_boundary_file()
+    tab.patch_list.setCurrentRow(0); tab.bc_type_combo.setCurrentText('Inlet'); tab.inlet_flow_rate.setValue(.002)
+    tab.write_0_directory()
+    assert not tab.dirty_patches,dialogs
+    assert not (case/'0/U').exists() and (case/'0/U.gz').is_file()
+    text=read_foam_text(case/'0/U')
+    assert value(text,'internalField')==value(before,'internalField')
+    assert 'downstream { type zeroGradient; }' in text
+    backups=list((case/'.ofsolvers-backups').glob('*/0/U.gz'))
+    assert len(backups)==1 and gzip.decompress(backups[0].read_bytes()).decode()==before
+    tab.close()
+
+
+def test_parallel_preflight_uses_processor_restart_times(tmp_path):
+    import shutil
+    case=prepared_case(tmp_path)
+    (case/'system/decomposeParDict').write_text('numberOfSubdomains 2;')
+    control=case/'system/controlDict'
+    control.write_text(update_values(control.read_text(),{'startFrom':'latestTime','endTime':2}))
+    # Root reconstruction can be ahead of the ranks and is not the MPI restart.
+    shutil.copytree(case/'0',case/'5')
+    for rank in range(2):
+        folder=case/f'processor{rank}'
+        shutil.copytree(case/'constant/polyMesh',folder/'constant/polyMesh')
+        shutil.copytree(case/'0',folder/'1')
+    report=check_case(case,'sedimentPimpleFoam',cores=2,check_programs=False)
+    assert report.ok and report.time_directory=='1',report.errors
+    shutil.copytree(case/'0',case/'processor1/1.5')
+    assert any('times disagree' in e for e in check_case(case,'sedimentPimpleFoam',cores=2,check_programs=False).errors)
+
+
+def test_vof_atmosphere_uses_physical_total_pressure(qapp):
+    from boundary_tab import BoundaryTab
+    tab=BoundaryTab(); tab.patch_list.addItem('top')
+    tab.patch_data={'top':{'type':'Atmosphere','atm_pressure':25}}
+    _,pressure,_,warnings=tab._build_boundary_dicts('interFoam')
+    assert not warnings
+    assert pressure['top']['type']=='prghTotalPressure' and pressure['top']['p0']=='uniform 25'
+    tab.close()

@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -23,7 +24,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from openfoam_dict_parser import OpenFoamDictParser
-from foam_io import boundary_patches, write_case_files, value, entries
+from foam_io import (boundary_patches, write_case_files, value, entries,
+                     foam_path, read_foam_text, encode_foam_text)
 from case_qaqc import PRESSURE_SOLVERS, VOF_SOLVERS
 
 
@@ -237,7 +239,7 @@ class BoundaryTab(QWidget):
     def import_patches_from_boundary_file(self):
         """Imports real patch names from constant/polyMesh/boundary metadata."""
         self._on_case_dir_edited()
-        boundary_path = os.path.join(self.case_dir, "constant", "polyMesh", "boundary")
+        boundary_path = foam_path(Path(self.case_dir)/'constant/polyMesh/boundary')
         if not os.path.isfile(boundary_path):
             QMessageBox.warning(
                 self,
@@ -371,7 +373,7 @@ class BoundaryTab(QWidget):
         layout = QFormLayout(page)
 
         info_label = QLabel(
-            "<i>Maps to: U (pressureInletOutletVelocity), p_rgh (totalPressure)</i>"
+            "<i>Maps to: U (pressureInletOutletVelocity), p_rgh (prghTotalPressure)</i>"
         )
         info_label.setWordWrap(True)
         layout.addRow(info_label)
@@ -465,8 +467,7 @@ class BoundaryTab(QWidget):
         fields = ['U','p_rgh','alpha.water'] if self.solver_profile_combo.currentText() in VOF_SOLVERS else ['U','p']
         for field in fields:
             try:
-                with open(os.path.join(self.case_dir,'0',field),encoding='utf-8') as stream:
-                    text = value(stream.read(),'boundaryField')[1:-1]
+                text = value(read_foam_text(Path(self.case_dir)/'0'/field),'boundaryField')[1:-1]
                 preview.append(field+': '+value(text,name))
             except (OSError,ValueError):
                 preview.append(field+': no explicit patch entry could be read')
@@ -587,45 +588,17 @@ class BoundaryTab(QWidget):
                     raise ValueError(f'{patch} is coupled; preserve and edit its advanced conditions manually.')
             contents = {}
 
-            u_parser = OpenFoamDictParser(
-                os.path.join(self.case_dir, "0", "U"),
-                default_class="volVectorField",
-                object_name="U",
-                default_dimensions="[0 1 -1 0 0 0 0]",
-                default_internal_field="uniform (0 0 0)",
-            )
+            conditions={'U':u_boundary,'p':p_boundary,'p_rgh':p_boundary,'alpha.water':alpha_boundary}
+            dimensions={'U':'[0 1 -1 0 0 0 0]','p':'[0 2 -2 0 0 0 0]',
+                        'p_rgh':'[1 -1 -2 0 0 0 0]','alpha.water':'[0 0 0 0 0 0 0]'}
             for name in fields:
-                path = os.path.join(self.case_dir, '0', name)
-                if not os.path.isfile(path):
+                path=foam_path(Path(self.case_dir)/'0'/name)
+                if not path.is_file():
                     raise ValueError(f'Missing 0/{name}; start from a complete case template.')
-            contents['0/U'] = u_parser.render({p: u_boundary[p] for p in targets}, merge=not rebuild)
-
-            if profile in VOF_SOLVERS:
-                p_parser = OpenFoamDictParser(
-                    os.path.join(self.case_dir, "0", "p_rgh"),
-                    default_class="volScalarField",
-                    object_name="p_rgh",
-                    default_dimensions="[1 -1 -2 0 0 0 0]",
-                    default_internal_field="uniform 0",
-                )
-                alpha_parser = OpenFoamDictParser(
-                    os.path.join(self.case_dir, "0", "alpha.water"),
-                    default_class="volScalarField",
-                    object_name="alpha.water",
-                    default_dimensions="[0 0 0 0 0 0 0]",
-                    default_internal_field="uniform 0",
-                )
-                contents['0/p_rgh'] = p_parser.render({p: p_boundary[p] for p in targets}, merge=not rebuild)
-                contents['0/alpha.water'] = alpha_parser.render({p: alpha_boundary[p] for p in targets}, merge=not rebuild)
-            else:
-                p_parser = OpenFoamDictParser(
-                    os.path.join(self.case_dir, "0", "p"),
-                    default_class="volScalarField",
-                    object_name="p",
-                    default_dimensions="[0 2 -2 0 0 0 0]",
-                    default_internal_field="uniform 0",
-                )
-                contents['0/p'] = p_parser.render({p: p_boundary[p] for p in targets}, merge=not rebuild)
+                parser=OpenFoamDictParser(str(path),
+                    'volVectorField' if name=='U' else 'volScalarField',name,dimensions[name])
+                text=parser.render({p:conditions[name][p] for p in targets},merge=not rebuild)
+                contents[str(path.relative_to(self.case_dir))]=encode_foam_text(path,text)
             backup = write_case_files(self.case_dir, contents)
             self.dirty_patches.clear()
             self.rebuild_boundaries.setChecked(False)
@@ -725,7 +698,7 @@ class BoundaryTab(QWidget):
                 }
                 if is_interfoam:
                     p_boundary[patch_name] = {
-                        "type": "totalPressure",
+                        "type": "prghTotalPressure",
                         "p0": f"uniform {atm_pressure}",
                         "value": "uniform 0",
                     }

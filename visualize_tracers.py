@@ -12,32 +12,48 @@ def load_tracks(run):
     run = Path(run)
     if not (run/'complete').is_file():
         raise ValueError('The run has no completion marker; inspect the solver log before using its tracks.')
+    columns=('x','y','z','vx','vy','vz','active','mobilized','left_region','crossed_rim','inside_region')
     with (run/'tracks.csv').open(encoding='utf-8') as stream:
-        rows = [{key:float(value) for key,value in row.items()} for row in csv.DictReader(stream)]
-    if not rows:
+        header=next(csv.reader(stream),[])
+    required=['time','id','diameter','density',*columns]
+    if len(set(header))!=len(header) or not set(required)<=set(header):
+        raise ValueError('Tracks need unique column names and all required particle state columns.')
+    eligible='pair_contact_eligible' in header
+    if eligible: required.append('pair_contact_eligible')
+    # NumPy reads numeric columns directly, avoiding one Python dictionary and
+    # dozens of boxed floats per recorded particle. Column names keep old and
+    # new solver output compatible, regardless of their CSV column order.
+    raw=np.loadtxt(run/'tracks.csv',delimiter=',',skiprows=1,
+                   usecols=[header.index(k) for k in required],ndmin=2,encoding='utf-8')
+    if raw.size==0:
         raise ValueError('No particle tracks found.')
-    times = sorted({r['time'] for r in rows})
-    ids = sorted({int(r['id']) for r in rows})
-    index = {id:i for i,id in enumerate(ids)}
-    time_index = {t:i for i,t in enumerate(times)}
-    data = np.full((len(times),len(ids),11),np.nan)
-    for r in rows:
-        data[time_index[r['time']],index[int(r['id'])]] = [r[k] for k in (
-            'x','y','z','vx','vy','vz','active','mobilized','left_region','crossed_rim','inside_region')]
-    if not np.isfinite(data).all():
+    if not np.isfinite(raw).all():
         raise ValueError('Tracks contain missing or nonfinite particle states.')
-    first = {int(r['id']):r for r in rows if r['time']==times[0]}
+    if np.any(raw[:,1]<0) or np.any(raw[:,1]!=np.floor(raw[:,1])):
+        raise ValueError('Particle IDs must be nonnegative integers.')
+    times,ti=np.unique(raw[:,0],return_inverse=True)
+    ids,first,ii=np.unique(raw[:,1],return_index=True,return_inverse=True)
+    if len(raw)!=len(times)*len(ids) or len(np.unique(ti*len(ids)+ii))!=len(raw):
+        raise ValueError('Tracks contain duplicate or missing time/particle states.')
+    if np.any(raw[:,2:4]<=0) or not np.array_equal(raw[:,2:4],raw[first[ii],2:4]):
+        raise ValueError('Particle diameter and density must stay positive and constant for each ID.')
+    flags=raw[:,10:15]
+    if np.any((flags!=0)&(flags!=1)):
+        raise ValueError('Particle state flags must be zero or one.')
+    if eligible and (np.any((raw[:,-1]!=0)&(raw[:,-1]!=1))
+                     or not np.array_equal(raw[:,-1],raw[first[ii],-1])):
+        raise ValueError('Pair-contact eligibility must stay zero or one for each ID.')
+    order=np.lexsort((ii,ti))
+    data=raw[order,4:15].reshape(len(times),len(ids),11)
     preview=False
     if (run/'largeTracerProperties').is_file():
         from foam_io import value
         try: preview=value((run/'largeTracerProperties').read_text(encoding='utf-8'),'previewOnly') in ('true','yes','on','1')
         except ValueError: pass
-    return dict(times=np.array(times),ids=ids,data=data,
-        preview=preview,
-        diameter=np.array([first[i]['diameter'] for i in ids]),
-        density=np.array([first[i]['density'] for i in ids]),
-        pair_eligible=([bool(first[i]['pair_contact_eligible']) for i in ids]
-                       if 'pair_contact_eligible' in rows[0] else None))
+    return dict(times=times,ids=[int(i) for i in ids],data=data,preview=preview,
+        diameter=raw[first,2],density=raw[first,3],
+        pair_eligible=raw[first,-1].astype(bool).tolist() if eligible else None)
+
 
 
 def bed_profile(case):
@@ -62,7 +78,7 @@ def plot_carrier(run, output):
     config = (run/'largeTracerProperties').read_text(encoding='utf-8')
     try: preview=value(config,'previewOnly') in ('true','yes','on','1')
     except ValueError: preview=False
-    time = float(value(config,'flowTime' if value(config,'frozenFlow')=='true' else 'startTime' if preview else 'endTime'))
+    time = float(value(config,'flowTime' if value(config,'frozenFlow') in ('true','yes','on','1') else 'startTime' if preview else 'endTime'))
     markers = sorted(case.glob('*.foam'))
     temporary = None
     if not markers:

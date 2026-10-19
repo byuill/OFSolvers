@@ -1,0 +1,8 @@
+{
+  "compressed_mesh_files": 5,
+  "saved_time": 0.01,
+  "atmosphere_p_rgh_min_pa": 36.75916705,
+  "atmosphere_p_rgh_max_pa": 36.772,
+  "expected_static_p_rgh_pa": 36.772,
+  "mesh_unchanged": true
+}
