@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "settings": {
+    "diameter": 0.004,
+    "density": 2650,
+    "length": 0.16,
+    "width": 0.064,
+    "height": 0.064,
+    "mobile_layers": 4,
+    "initial_speed": 0.3,
+    "driving_acceleration": 0.1,
+    "young_modulus": 100000000.0,
+    "poisson_ratio": 0.25,
+    "restitution": 0.8,
+    "friction": 0.5,
+    "rolling_stiffness": 1000,
+    "rolling_damping": 0.1,
+    "rolling_friction": 0.05,
+    "end_time": 0.03,
+    "delta_t": 0.0001,
+    "dem_delta_t": 2e-06,
+    "write_interval": 0.002,
+    "turbulence": "kOmegaSST",
+    "kernel_ratio": 3,
+    "volume_samples": 128
+  },
+  "particles": 2925,
+  "description": "Submerged periodic bed; fixed basal roughness, mobile physical spheres; startup demonstration, not calibrated bedload."
+}

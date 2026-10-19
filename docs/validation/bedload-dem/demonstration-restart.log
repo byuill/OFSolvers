@@ -1,0 +1,107 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:                                        |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : OPENFOAM=1912 patch=200626
+Arch   : "LSB;label=32;scalar=64"
+Exec   : bedloadDemPimpleFoam -case <DEMO_CASE>
+Date   : Oct 19 2026
+Time   : 03:39:05
+Host   : db70794bae38
+PID    : 28392
+I/O    : uncollated
+Case   : <DEMO_CASE>
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0.03
+
+
+PIMPLE: no residual control data found. Calculations will employ 2 corrector loops
+
+
+Reading g
+Embedded LAMMPS version 20250722; 2925 physical grains
+DEM outputs: "<DEMO_CASE>/postProcessing/bedloadDEM/bedload-0.03"
+Selecting incompressible transport model Newtonian
+Selecting turbulence model type RAS
+Selecting RAS turbulence model kOmegaSST
+Selecting patchDistMethod meshWave
+RAS
+{
+    RASModel        kOmegaSST;
+    turbulence      on;
+    printCoeffs     on;
+    alphaK1         0.85;
+    alphaK2         1;
+    alphaOmega1     0.5;
+    alphaOmega2     0.856;
+    gamma1          0.5555555555555556;
+    gamma2          0.44;
+    beta1           0.075;
+    beta2           0.0828;
+    betaStar        0.09;
+    a1              0.31;
+    b1              1;
+    c1              10;
+    F3              false;
+    decayControl    false;
+    kInf            0;
+    omegaInf        0;
+}
+
+Time = 0.0301
+DEM coupling: subcycles=51 minPorosity=0.4471551013997733 impulseResidual=9.492847208867681e-20 kg m/s
+PIMPLE: iteration 1
+smoothSolver:  Solving for Ux, Initial residual = 0.03700154899896724, Final residual = 1.545755848419721e-13, No Iterations 3
+smoothSolver:  Solving for Uy, Initial residual = 0.4367595019805971, Final residual = 1.599062421824007e-12, No Iterations 3
+smoothSolver:  Solving for Uz, Initial residual = 0.1788417772597582, Final residual = 1.542196997583956e-12, No Iterations 3
+DICPCG:  Solving for p, Initial residual = 0.7105681951345016, Final residual = 5.152165214938099e-12, No Iterations 40
+DICPCG:  Solving for p, Initial residual = 5.211202864781902e-12, Final residual = 5.211202864781902e-12, No Iterations 0
+DICPCG:  Solving for p, Initial residual = 0.0006253081939373394, Final residual = 8.937998419224708e-12, No Iterations 34
+DICPCG:  Solving for p, Initial residual = 8.938421106973835e-12, Final residual = 8.938421106973835e-12, No Iterations 0
+PIMPLE: iteration 2
+smoothSolver:  Solving for Ux, Initial residual = 0.0003069634395509544, Final residual = 1.573565814138959e-12, No Iterations 2
+smoothSolver:  Solving for Uy, Initial residual = 0.0004261202451266673, Final residual = 1.900557593754992e-12, No Iterations 2
+smoothSolver:  Solving for Uz, Initial residual = 0.0003186734939037833, Final residual = 1.441935157617019e-12, No Iterations 2
+DICPCG:  Solving for p, Initial residual = 0.0006644806873844435, Final residual = 4.77768415283436e-12, No Iterations 34
+DICPCG:  Solving for p, Initial residual = 4.777552876913223e-12, Final residual = 4.777552876913223e-12, No Iterations 0
+DICPCG:  Solving for p, Initial residual = 6.224618818937846e-07, Final residual = 9.747811896631626e-12, No Iterations 27
+DICPCG:  Solving for p, Initial residual = 9.747791202504948e-12, Final residual = 9.747791202504948e-12, No Iterations 0
+smoothSolver:  Solving for omega, Initial residual = 0.00206200417581698, Final residual = 1.624684721282399e-11, No Iterations 2
+smoothSolver:  Solving for k, Initial residual = 0.002880690725466547, Final residual = 2.576194384683779e-11, No Iterations 2
+CFD--DEM continuity: L1=4.944464945262099e-11 /s cumulative=5.878029062812534e-22 m3
+ExecutionTime = 1.56 s  ClockTime = 2 s
+
+Time = 0.0302
+DEM coupling: subcycles=51 minPorosity=0.44684191365558 impulseResidual=1.12626720106664e-19 kg m/s
+PIMPLE: iteration 1
+smoothSolver:  Solving for Ux, Initial residual = 0.03524529196450704, Final residual = 1.176308519258521e-13, No Iterations 3
+smoothSolver:  Solving for Uy, Initial residual = 0.4367465759109656, Final residual = 1.508296226028028e-12, No Iterations 3
+smoothSolver:  Solving for Uz, Initial residual = 0.1852315370295469, Final residual = 7.128128472656455e-13, No Iterations 3
+DICPCG:  Solving for p, Initial residual = 0.7247871102118394, Final residual = 5.03519619232532e-12, No Iterations 40
+DICPCG:  Solving for p, Initial residual = 5.224442250796347e-12, Final residual = 5.224442250796347e-12, No Iterations 0
+DICPCG:  Solving for p, Initial residual = 0.0006343390924716144, Final residual = 6.993572717713246e-12, No Iterations 34
+DICPCG:  Solving for p, Initial residual = 6.993321781307098e-12, Final residual = 6.993321781307098e-12, No Iterations 0
+PIMPLE: iteration 2
+smoothSolver:  Solving for Ux, Initial residual = 0.000293405290038534, Final residual = 1.551368925189435e-12, No Iterations 2
+smoothSolver:  Solving for Uy, Initial residual = 0.0004298890689454466, Final residual = 1.692951513345556e-12, No Iterations 2
+smoothSolver:  Solving for Uz, Initial residual = 0.0002995054998376438, Final residual = 1.378790766576549e-12, No Iterations 2
+DICPCG:  Solving for p, Initial residual = 0.0007045066542843637, Final residual = 4.840837826511823e-12, No Iterations 34
+DICPCG:  Solving for p, Initial residual = 4.840265737344251e-12, Final residual = 4.840265737344251e-12, No Iterations 0
+DICPCG:  Solving for p, Initial residual = 6.367313046443535e-07, Final residual = 4.999296370784664e-12, No Iterations 27
+DICPCG:  Solving for p, Initial residual = 4.99929208511157e-12, Final residual = 4.99929208511157e-12, No Iterations 0
+smoothSolver:  Solving for omega, Initial residual = 0.002128996326377383, Final residual = 1.336705872420249e-11, No Iterations 2
+smoothSolver:  Solving for k, Initial residual = 0.003051264186296768, Final residual = 1.933883470386051e-11, No Iterations 2
+CFD--DEM continuity: L1=2.365000010865305e-11 /s cumulative=1.06514669326019e-21 m3
+ExecutionTime = 2.88 s  ClockTime = 3 s
+
+End

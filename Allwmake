@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --with-dem ]; }; then
+    echo 'Usage: ./Allwmake [--with-dem]' >&2
+    exit 1
+fi
+if [ "$#" -eq 1 ] && [ ! -f "${LAMMPS_ROOT:-}/include/lammps/library.h" ]; then
+    echo 'Set LAMMPS_ROOT to a serial LAMMPS installation with GRANULAR; see docs/bedloadDemPimpleFoam.md.' >&2
+    exit 1
+fi
 if ! command -v wmake >/dev/null; then
     echo 'Activate OpenFOAM v1912 first. In this cloud instance: source scripts/openfoam-env.sh' >&2
     exit 1
@@ -13,3 +21,6 @@ wmake applications/solvers/sedimentPimpleFoam
 wmake applications/solvers/sandParcelPimpleFoam
 wmake applications/solvers/sedimentInterFoam
 wmake applications/solvers/largeTracerFoam
+if [ "$#" -eq 1 ]; then
+    wmake applications/solvers/bedloadDemPimpleFoam
+fi

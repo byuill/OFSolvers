@@ -9,9 +9,9 @@ import shutil
 from foam_io import boundary_patches, entries, scalar, value, foam_path, read_foam_text
 
 SOLVERS = ('interFoam', 'multiphaseEulerFoam', 'buoyantBoussinesqPimpleFoam',
-           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'sedimentInterFoam')
+           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'sedimentInterFoam', 'bedloadDemPimpleFoam')
 VOF_SOLVERS = {'interFoam','sedimentInterFoam'}
-PRESSURE_SOLVERS = {'pimpleFoam', 'simpleFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam'}
+PRESSURE_SOLVERS = {'pimpleFoam', 'simpleFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'bedloadDemPimpleFoam'}
 
 
 @dataclass
@@ -117,6 +117,10 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
         properties += ['sedimentProperties', 'g']
     if solver == 'sandParcelPimpleFoam':
         properties += ['sandCloudProperties', 'g']
+    if solver == 'bedloadDemPimpleFoam':
+        properties += ['demCouplingProperties','g']
+        fields += ['porosity']
+        result.warnings.append('CFD–DEM currently supports submerged, axis-aligned periodic/walled boxes and native LAMMPS checkpoints. See the coupled solver guide.')
     for name in properties:
         if not (case/'constant'/name).is_file():
             result.errors.append(f'Missing constant/{name}.')
@@ -159,7 +163,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                     'internalField uniform 0;', field_text, flags=re.S)
                 dimensions = {'U':[0,1,-1,0,0,0,0], 'p':[0,2,-2,0,0,0,0],
                     'p_rgh':[1,-1,-2,0,0,0,0], 'alpha.water':[0]*7,
-                    'C':[1,-3,0,0,0,0,0], 'Mbed':[1,-2,0,0,0,0,0]}
+                    'C':[1,-3,0,0,0,0,0], 'Mbed':[1,-2,0,0,0,0,0], 'porosity':[0]*7}
                 if name in dimensions:
                     actual_dimensions = [float(v) for v in value(field_text,'dimensions').strip('[]').split()]
                     if actual_dimensions != dimensions[name]:
@@ -245,8 +249,16 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
             result.errors.append('Processor restart times disagree; retain a consistent complete saved time.')
         if rank_times and len(set(rank_times)) == 1:
             result.time_directory = rank_times[0]
+    if solver=='bedloadDemPimpleFoam' and result.time_directory:
+        if float(result.time_directory)==0:
+            if not (case/'constant/DEM/particles.data').is_file():
+                result.errors.append('Missing constant/DEM/particles.data: generate physical DEM grains first.')
+        else:
+            for name in ('lammps.restart','couplingState'):
+                if not (case/result.time_directory/'uniform/DEM'/name).is_file():
+                    result.errors.append(f'Missing DEM restart checkpoint {result.time_directory}/uniform/DEM/{name}.')
     if check_programs:
-        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam','sedimentInterFoam'):
+        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam','sedimentInterFoam','bedloadDemPimpleFoam'):
             version = os.environ.get('WM_PROJECT_VERSION','')
             if version and version not in ('1912','v1912'):
                 result.errors.append(f'The custom sediment solvers require OpenCFD v1912; active version is {version}.')

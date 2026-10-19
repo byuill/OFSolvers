@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+destination="${1:-$(mktemp -d -t bedload-dem-XXXXXX)}"
+python3 "$root/bedload_dem.py" "$destination"
+"$destination/Allrun"
+python3 "$root/visualize_dem.py" "$destination/postProcessing/bedloadDEM/bedload-0"
+printf 'Results: %s\n' "$destination"

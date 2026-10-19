@@ -1,7 +1,8 @@
 # OFSolvers
 
-This repository includes three custom sediment-transport flow solvers and an
-individual large-particle replay solver, with example cases and user guides.
+This repository includes three custom sediment-transport flow solvers, an
+individual large-particle replay solver, and an optional LAMMPS-coupled turbulent
+CFD–DEM bedload solver, with example cases and user guides.
 The Python/PyQt river workbench configures sediment models, initial and boundary
 conditions, mesh dictionaries and case/mesh QAQC, including a free-surface flume.
 
@@ -14,6 +15,7 @@ sediment controls and QAQC.
 
 | Solver | Choose it when you need | Guide | Example case |
 | --- | --- | --- | --- |
+| `bedloadDemPimpleFoam` | Submerged two-way turbulent CFD–DEM with physical grain contacts and evolving bed porosity; experimental research coupling | [CFD–DEM guide](docs/bedloadDemPimpleFoam.md) | [4 mm bed generator](bedload_dem.py) |
 | `largeTracerFoam` | 1–999 physical spheres with size/density distributions, buoyancy, contact, retention events and trajectories in saved flow | [Large tracer guide](docs/largeTracerFoam.md) | [Free-surface scour demo](tutorials/largeTracerScour/Allrun) |
 | `sedimentInterFoam` | Moving water–air free surface with phase-weighted suspended sediment and finite bed exchange | [VOF sediment guide](docs/sedimentInterFoam.md) | [Castle flume generator](castle_flume.py) |
 | `sedimentPimpleFoam` | A suspended concentration field, settling and conservative exchange with a finite bed inventory | [Eulerian sediment guide](docs/sedimentPimpleFoam.md) | [sedimentChannel](tutorials/sedimentChannel) |
@@ -59,7 +61,15 @@ instructions in [Getting started](docs/getting-started.md).
 - [Tutorials](tutorials): complete runnable case dictionaries and initial fields.
 - [Executable integration checks](tests/openfoam): concentration, parcel and
   resuspension checks using the actual OpenFOAM solvers.
-- [Allwmake](Allwmake): builds all four solvers after OpenFOAM activation.
+- [Allwmake](Allwmake): builds the four standard solvers after OpenFOAM activation;
+  add `--with-dem` for the optional CFD–DEM solver.
+
+The optional [CFD–DEM solver](docs/bedloadDemPimpleFoam.md) uses a serial LAMMPS
+GRANULAR library on the CFD master, with serial or MPI fluid flow. Build it with
+`LAMMPS_ROOT=/path/to/lammps ./Allwmake --with-dem`. Its default submerged case
+contains 2,925 physical 4 mm grains and exports per-grain histories, bedload flux,
+VTK particles and a central x–z fluid-velocity plot. Component validation does not
+replace calibration of research bedload predictions.
 
 The guides, solver sources and tutorials are versioned together in this repository.
 Compiled executables are built locally; generated case results are separate from

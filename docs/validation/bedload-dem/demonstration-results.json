@@ -1,0 +1,16 @@
+{
+  "particles": 2925,
+  "mobile_particles": 2340,
+  "fixed_particles": 585,
+  "diameter_m": 0.004,
+  "final_time_s": 0.03,
+  "cfd_steps": 300,
+  "min_porosity": 0.4471501693093136,
+  "max_impulse_residual_kg_m_s": 7.589415322797611e-19,
+  "max_continuity_l1_per_s": 1.049252218026213e-10,
+  "particle_mass_kg": 0.25974688059879336,
+  "fluid_volume_m3": 0.0005573423092079959,
+  "bedload_flux_m2_s": 0.0004954305310929167,
+  "max_pair_overlap_fraction_of_diameter": 0.002368077971431383,
+  "particle_mass_change_kg": 0.0
+}
