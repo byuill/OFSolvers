@@ -197,7 +197,7 @@ def test_workbench_keeps_execution_and_diagnostics_available_while_busy(qapp):
     assert window.wizard_banner.isHidden() and not window.wizard_banner.timer.isActive()
     window.wizard_action.setChecked(True)
     assert not window.wizard_banner.isHidden()
-    window.navigation.setCurrentItem(window._navigation_items[8])
+    window.navigation.setCurrentItem(window._navigation_items[window.tabs.indexOf(window.tab_diagnostics)])
     assert window.tabs.currentWidget() is window.tab_diagnostics
     window.set_busy(False)
     assert window.open_action.isEnabled() and window.solve_action.isEnabled()

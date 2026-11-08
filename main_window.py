@@ -184,7 +184,10 @@ class MainWindow(QMainWindow):
 
     def _setup_navigation(self):
         self._navigation_items = {}
-        groups = [('PLAN', [0]), ('PREPROCESS', [1, 2, 3]), ('PHYSICS', [4, 5, 6]), ('RUN AND REVIEW', [7, 8])]
+        w = self.tabs.indexOf
+        groups = [('PLAN', [0]), ('PREPROCESS', [1, 2, 3]), ('PHYSICS', [4, 5, 6]),
+                  ('SPECIALIZED', [w(self.tab_flume), w(self.tab_tracers)]),
+                  ('RUN AND REVIEW', [w(self.tab_execution), w(self.tab_diagnostics)])]
         for name, indices in groups:
             group = QTreeWidgetItem([name])
             group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
@@ -215,6 +218,8 @@ class MainWindow(QMainWindow):
             'Set water-flow boundaries using the actual mesh patch names.',
             'Configure the turbulence closure and its initial/boundary fields.',
             'Prepare suspended-concentration or sand-parcel transport on a fixed water domain and fixed bed.',
+            'Generate the castle flume preset with a free-surface sediment setup and local mesh refinement.',
+            'Configure large physical particles, contact and boundary behavior for replay in saved carrier flow.',
             'Check case files and the native mesh, execute commands, and retain their logs and settings.',
             'Review residuals, Courant numbers, conservation, computational cost and error context; compare runs.',
         ]
