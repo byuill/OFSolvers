@@ -18,8 +18,16 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QFileDialog,
     QMessageBox,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QToolBar,
+    QStyle,
+    QDialog,
+    QTextBrowser,
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt, QUrl
+from PyQt6.QtGui import QAction, QKeySequence
 from case_qaqc import SOLVERS
 from foam_io import value, scalar
 
@@ -30,6 +38,8 @@ from geometry_tab import GeometryTab
 from terrain_tab import TerrainTab
 from execution_tab import ExecutionTab
 from sediment_tab import SedimentTab
+from diagnostics_tab import DiagnosticsTab
+from wizard_banner import WizardBanner
 from flume_tab import FlumeTab
 from tracer_tab import TracerTab
 
@@ -38,13 +48,16 @@ class MainWindow(QMainWindow):
     case_directory_changed = pyqtSignal(str)
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("OpenFOAM GUI")
-        self.resize(900, 600)
+        self.setWindowTitle('OFSolvers · River modeling workbench')
+        self.resize(1360, 1000)
+        self.setMinimumSize(1000, 800)
 
         # Main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        self.wizard_banner = WizardBanner(self)
+        layout.addWidget(self.wizard_banner)
 
         self.case_dir = ''
         case_layout = QHBoxLayout()
@@ -65,9 +78,34 @@ class MainWindow(QMainWindow):
         self.workflow_hint=QLabel(); self.workflow_hint.setWordWrap(True); layout.addWidget(self.workflow_hint)
         self.particle_workflow=False
 
+        self.case_hint = QLabel('Start by selecting a case folder. River Sediment can create a runnable channel starter in an empty folder.')
+        self.case_hint.setTextFormat(Qt.TextFormat.PlainText)
+        self.case_hint.setWordWrap(True)
+        layout.addWidget(self.case_hint)
+
         # Tab Widget
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        self.workspace = QSplitter(Qt.Orientation.Horizontal)
+        self.navigation = QTreeWidget()
+        self.navigation.setObjectName('workflowNavigation')
+        self.navigation.setHeaderHidden(True)
+        self.navigation.setRootIsDecorated(False)
+        self.navigation.setMinimumWidth(210)
+        self.workspace.addWidget(self.navigation)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        self.stage_title = QLabel()
+        self.stage_title.setObjectName('stageTitle')
+        self.stage_description = QLabel()
+        self.stage_description.setWordWrap(True)
+        content_layout.addWidget(self.stage_title)
+        content_layout.addWidget(self.stage_description)
+        content_layout.addWidget(self.tabs, 1)
+        self.workspace.addWidget(content)
+        self.workspace.setStretchFactor(1, 1)
+        self.workspace.setSizes([240, 1100])
+        layout.addWidget(self.workspace, 1)
+        self.tabs.tabBar().hide()
 
         # Tab 1: Conceptualization
         self.tab_concept = QWidget()
@@ -131,6 +169,141 @@ class MainWindow(QMainWindow):
         self.tab_execution.busy_changed.connect(self.set_busy)
         self.workflow.currentIndexChanged.connect(self.set_workflow)
         self.set_workflow()
+
+        self.tab_diagnostics = DiagnosticsTab()
+        self.tabs.addTab(self.tab_diagnostics, '9. Run diagnostics')
+        self.tab_execution.diagnostics_updated.connect(self.tab_diagnostics.receive_live)
+        self.tab_geometry.river_design.case_exported.connect(self._on_starter_prepared)
+        self.tab_geometry.river_design.mesh_requested.connect(self._build_river_mesh)
+        self.tab_execution.river_mesh_finished.connect(self.tab_geometry.river_design.mesh_completed)
+        self._setup_navigation()
+        self._setup_toolbar()
+        self._apply_style()
+        self.tabs.currentChanged.connect(self._stage_changed)
+        self._stage_changed(0)
+
+    def _setup_navigation(self):
+        self._navigation_items = {}
+        w = self.tabs.indexOf
+        groups = [('PLAN', [0]), ('PREPROCESS', [1, 2, 3]), ('PHYSICS', [4, 5, 6]),
+                  ('SPECIALIZED', [w(self.tab_flume), w(self.tab_tracers)]),
+                  ('RUN AND REVIEW', [w(self.tab_execution), w(self.tab_diagnostics)])]
+        for name, indices in groups:
+            group = QTreeWidgetItem([name])
+            group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            font = group.font(0)
+            font.setBold(True)
+            group.setFont(0, font)
+            self.navigation.addTopLevelItem(group)
+            for index in indices:
+                item = QTreeWidgetItem([self.tabs.tabText(index)])
+                item.setData(0, Qt.ItemDataRole.UserRole, index)
+                group.addChild(item)
+                self._navigation_items[index] = item
+            group.setExpanded(True)
+        self.navigation.currentItemChanged.connect(self._navigate)
+
+    def _navigate(self, item, previous):
+        if item is not None:
+            index = item.data(0, Qt.ItemDataRole.UserRole)
+            if index is not None and self.tabs.isTabEnabled(index):
+                self.tabs.setCurrentIndex(index)
+
+    def _stage_changed(self, index):
+        descriptions = [
+            'Plan the domain, time controls and hydraulic regime. Saving the plan does not start a simulation.',
+            'Design synthetic river terrain, wall spacing, obstacles and hydraulic boundaries, or prepare imported geometry.',
+            'Convert projected terrain data into local model geometry; check units and vertical reference.',
+            'Create the background mesh and snappyHexMesh inputs, then inspect mesh quality.',
+            'Set water-flow boundaries using the actual mesh patch names.',
+            'Configure the turbulence closure and its initial/boundary fields.',
+            'Prepare suspended-concentration or sand-parcel transport on a fixed water domain and fixed bed.',
+            'Generate the castle flume preset with a free-surface sediment setup and local mesh refinement.',
+            'Configure large physical particles, contact and boundary behavior for replay in saved carrier flow.',
+            'Check case files and the native mesh, execute commands, and retain their logs and settings.',
+            'Review residuals, Courant numbers, conservation, computational cost and error context; compare runs.',
+        ]
+        self.stage_title.setText(self.tabs.tabText(index))
+        self.stage_description.setText(descriptions[index])
+        item = self._navigation_items.get(index)
+        if item is not None and self.navigation.currentItem() is not item:
+            self.navigation.setCurrentItem(item)
+        if hasattr(self, 'tab_diagnostics') and self.tabs.widget(index) is self.tab_diagnostics:
+            self.tab_diagnostics.render_report()
+
+    def _setup_toolbar(self):
+        toolbar = QToolBar('Case workflow', self)
+        toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.addToolBar(toolbar)
+        def action(text, icon, callback, shortcut=None):
+            result = QAction(self.style().standardIcon(icon), text, self)
+            result.triggered.connect(callback)
+            if shortcut:
+                result.setShortcut(shortcut)
+            toolbar.addAction(result)
+            return result
+        self.open_action = action('Open case', QStyle.StandardPixmap.SP_DirOpenIcon,
+                                  self.browse_case_directory, QKeySequence.StandardKey.Open)
+        self.save_action = action('Save plan', QStyle.StandardPixmap.SP_DialogSaveButton,
+                                  self.run_button.click, QKeySequence.StandardKey.Save)
+        toolbar.addSeparator()
+        self.check_action = action('Check case', QStyle.StandardPixmap.SP_DialogApplyButton,
+                                   self._check_from_toolbar)
+        self.solve_action = action('Run solver', QStyle.StandardPixmap.SP_MediaPlay,
+                                   self._run_from_toolbar)
+        action('Run diagnostics', QStyle.StandardPixmap.SP_FileDialogDetailedView,
+               lambda: self.tabs.setCurrentWidget(self.tab_diagnostics))
+        toolbar.addSeparator()
+        action('GUI guide', QStyle.StandardPixmap.SP_DialogHelpButton, self.show_gui_guide,
+               QKeySequence.StandardKey.HelpContents)
+        toolbar.addSeparator()
+        self.wizard_action = QAction('Wizard banner', self)
+        self.wizard_action.setCheckable(True)
+        self.wizard_action.setChecked(True)
+        self.wizard_action.setToolTip('Show or hide the animated pixel wizard landscape')
+        self.wizard_action.toggled.connect(self.wizard_banner.setVisible)
+        toolbar.addAction(self.wizard_action)
+
+    def _check_from_toolbar(self):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.run_qaqc()
+
+    def _run_from_toolbar(self):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.run_solver()
+
+    def _build_river_mesh(self):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.run_river_mesh()
+
+    def show_gui_guide(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle('OFSolvers GUI guide')
+        dialog.resize(920, 760)
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        root = Path(__file__).resolve().parent
+        browser.document().setBaseUrl(QUrl.fromLocalFile(str(root)+'/'))
+        browser.setMarkdown((root/'GUI_README.md').read_text(encoding='utf-8'))
+        layout.addWidget(browser)
+        dialog.exec()
+
+    def _apply_style(self):
+        self.setStyleSheet('''
+            QMainWindow { background: #f1f5f9; }
+            QToolBar { background: #ffffff; border-bottom: 1px solid #cbd5e1; spacing: 12px; padding: 8px; }
+            QGroupBox { font-weight: 600; border: 1px solid #cbd5e1; border-radius: 5px; margin-top: 14px; padding-top: 14px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+            QPushButton { padding: 6px 10px; }
+            QLabel#stageTitle { font-size: 21px; font-weight: 600; color: #0f172a; }
+            QLabel#diagnosticSummary { background: #e6f4f1; color: #134e4a; padding: 10px; border-radius: 5px; }
+            QTreeWidget#workflowNavigation { background: #142d3a; color: #e2e8f0; border: none; font-size: 12px; }
+            QTreeWidget#workflowNavigation::item { padding: 10px 5px; }
+            QTreeWidget#workflowNavigation::item:selected { background: #087f8c; color: white; }
+            QTreeWidget#workflowNavigation::item:disabled { color: #8b9eae; }
+        ''')
 
     def setup_conceptual_tab(self):
         main_h_layout = QHBoxLayout(self.tab_concept)
@@ -429,11 +602,20 @@ class MainWindow(QMainWindow):
             raise ValueError('Case folder does not exist.')
         self.case_dir = str(folder)
         self.case_dir_edit.setText(self.case_dir)
-        for tab in (self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
-                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume, self.tab_tracers):
+        for tab in (self.tab_geometry, self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
+                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume, self.tab_tracers, self.tab_diagnostics):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
         self.workflow.setCurrentIndex(1 if (folder/'tracers.json').is_file() else 0)
+        if (folder/'river-design.json').is_file():
+            try:
+                from river_case import load_river_case
+                river,design=load_river_case(folder)
+                if river.get('boundaries_ready'):
+                    self.sim_combo.setCurrentText('RAS')
+                    self.tab_turbulence.model_combo.setCurrentText(design.hydraulic.turbulence)
+            except (OSError,ValueError,KeyError,TypeError):pass
+        self.case_hint.setText('Active case: '+folder.name+' · Use Run diagnostics to review logs; open saved flow/parcel fields in ParaView.')
         control = folder/'system/controlDict'
         if control.exists():
             try:
@@ -491,10 +673,22 @@ class MainWindow(QMainWindow):
         self.case_browse_button.setEnabled(not running)
         self.run_button.setEnabled(not running)
         self.workflow.setEnabled(not running)
-        for i in range(self.tabs.count()-1):
-            self.tabs.setTabEnabled(i, not running)
+        self.open_action.setEnabled(not running)
+        self.save_action.setEnabled(not running)
+        self.check_action.setEnabled(not running)
+        self.solve_action.setEnabled(not running)
+        for i in range(self.tabs.count()):
+            enabled = not running or self.tabs.widget(i) in (self.tab_execution, self.tab_diagnostics)
+            self.tabs.setTabEnabled(i, enabled)
+            self._navigation_items[i].setDisabled(not enabled)
 
     def closeEvent(self, event):
+        reader = self.tab_diagnostics.worker
+        if reader is not None and reader.isRunning():
+            reader.requestInterruption()
+            if not reader.wait(2000):
+                event.ignore()
+                return
         worker = self.tab_execution.worker
         if worker is not None and worker.isRunning():
             worker.stop()
@@ -502,4 +696,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.tab_mesh.plotter.close()
+        self.tab_geometry.river_design.plotter.close()
+        self.tab_diagnostics.timer.stop()
+        self.wizard_banner.timer.stop()
         event.accept()

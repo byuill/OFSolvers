@@ -1,5 +1,10 @@
 # Source this Bash file for the prepared Debian/cloud installation only.
 # Normal OpenFOAM installations: source the distribution's etc/bashrc instead.
+if [ -f /workspace/ofsolvers-native/env.sh ]; then
+    source /workspace/ofsolvers-native/env.sh
+    export LIBRARY_PATH=/workspace/ofsolvers-native/runtime/usr/lib:${LIBRARY_PATH:-}
+    return 0
+fi
 if [ ! -d /workspace/openfoam-source/openfoam-1912.200626/src ]; then
     echo 'Matching Debian v1912 source headers are missing; see docs/sedimentPimpleFoam.md.' >&2
     return 1

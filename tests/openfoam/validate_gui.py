@@ -172,5 +172,29 @@ with patch.object(QMessageBox,'information',lambda parent,title,text,*args:dialo
     assert execution.status_label.text()=='Solver completed.',execution.console.toPlainText()[-5000:]
     (geometry/'log.gui.custom-river').write_text(execution.console.toPlainText())
     print('PASS: custom mesh flow-boundary rebuild, sediment patch setup and native parcel run',flush=True)
+    # The integrated designer must drive the full native pipeline and finalize
+    # water/RANS/sediment fields from the resulting named surface patches.
+    from river_design import RiverDesign,Channel,MeshDesign,Hydraulics,Obstacle
+    from river_case import load_river_case
+    designed=WORK/'designedRiver';designed.mkdir()
+    window.set_case_directory(str(designed));designer=window.tab_geometry.river_design
+    designer.set_design(RiverDesign(
+        Channel(length=6,width=2,depth=.6,bank_slope=.5,stations=25,cross_points=17),
+        MeshDesign(base_size=.3,wall_size=.15,first_height=.03,layers=1,cells_per_obstacle=6),
+        Hydraulics(discharge=.1,inlet_c=.02,end_time=.01),
+        [Obstacle(x=3,length=.5,width=.5,height=.3)]))
+    designer.create_case();designer.request_mesh();wait_execution()
+    data,_=load_river_case(designed)
+    assert data['mesh_checked'] and data['boundaries_ready'],execution.console.toPlainText()[-5000:]
+    assert 'Native mesh checks passed' in designer.status.text(),designer.status.text()
+    assert window.sim_combo.currentText()=='RAS'
+    assert window.tab_turbulence.model_combo.currentText()=='kOmegaSST'
+    control(designed,endTime=.002,deltaT=.001,maxDeltaT=.001,writeInterval=.002)
+    execution.run_solver();wait_execution()
+    assert execution.status_label.text()=='Solver completed.',execution.console.toPlainText()[-5000:]
+    assert (designed/'0.002/C').exists()
+    budgets=re.findall(r'Sediment budget: suspended=(\S+) bed=(\S+) externalOut=(\S+) residual=(\S+) kg; min\(C\)=(\S+)',execution.console.toPlainText())
+    assert budgets and all(abs(float(row[3]))<1e-10 and float(row[4])>=-1e-10 for row in budgets)
+    print('PASS: integrated river designer, native snappy pipeline, rough-wall boundaries and sediment run',flush=True)
 window.close();app.processEvents()
 print('All GUI-to-OpenFOAM workflows passed.',flush=True)

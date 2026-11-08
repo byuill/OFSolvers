@@ -17,8 +17,10 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QDoubleSpinBox,
     QMessageBox,
+    QTabWidget,
 )
 from PyQt6.QtCore import Qt
+from river_design_tab import RiverDesignTab
 
 
 class GeometryTab(QWidget):
@@ -38,8 +40,18 @@ class GeometryTab(QWidget):
         """Allows access to the Mesh tab to read background mesh dimensions."""
         self.mesh_tab = mesh_tab
 
+    def set_case_directory(self,path):
+        self.river_design.set_case_directory(path)
+
     def setup_ui(self):
-        main_layout = QHBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        self.workspace_tabs = QTabWidget()
+        outer_layout.addWidget(self.workspace_tabs)
+        self.river_design = RiverDesignTab()
+        self.workspace_tabs.addTab(self.river_design,'Synthetic river, mesh and boundaries')
+        imported = QWidget()
+        self.workspace_tabs.addTab(imported,'Imported geometry tools')
+        main_layout = QHBoxLayout(imported)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(self.splitter)
 

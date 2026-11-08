@@ -178,9 +178,9 @@ def configure_case(case_dir, config):
         interaction = []
         for patch in patches:
             name = patch['name']
-            if patch['type'] in ('cyclic','cyclicAMI','symmetry','symmetryPlane'):
+            if patch['type'] in ('cyclic','cyclicAMI'):
                 continue
-            kind = 'stick' if name in beds else ('rebound' if patch['type'] == 'wall' else 'escape')
+            kind = 'stick' if name in beds else ('rebound' if patch['type'] in ('wall','symmetry','symmetryPlane') else 'escape')
             coeff = ' e 1; mu 0;' if kind == 'rebound' else ''
             interaction.append(f'{name} {{ type {kind};{coeff} }}')
         sub = value(text,'subModels')[1:-1]

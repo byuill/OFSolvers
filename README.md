@@ -1,82 +1,105 @@
-# OFSolvers
+# OFSolvers — river modeling workbench
 
-This repository includes three custom sediment-transport flow solvers, an
-individual large-particle replay solver, and an optional LAMMPS-coupled turbulent
-CFD–DEM bedload solver, with example cases and user guides.
-The Python/PyQt river workbench configures sediment models, initial and boundary
-conditions, mesh dictionaries and case/mesh QAQC, including a free-surface flume.
+OFSolvers combines an OpenFOAM desktop preprocessor, **run QAQC and debugging
+tools**, and two custom sediment-transport solvers. It focuses on open-channel
+and river applications: geometry, terrain, meshing, hydraulic boundaries,
+turbulence, suspended sediment and sand parcels. Use **ParaView** to visualize
+saved flow and particle fields; the GUI's post-processing focuses on numerical
+stability, conservation, computational performance and error investigation.
 
-## User guides
+It also includes an individual large-particle replay solver, a free-surface
+VOF sediment solver, and an optional LAMMPS-coupled turbulent CFD–DEM bedload
+solver, with a castle flume preset and large-tracer workbench.
 
-Start with [Getting started](docs/getting-started.md) for installation requirements,
-building, running examples, finding files on Windows/WSL and viewing results.
-Use the [River GUI guide](docs/gui-user-guide.md) for the desktop setup workflow,
-sediment controls and QAQC.
+**New to the desktop application? Start with the [GUI README](GUI_README.md).**
+It covers installation, the workflow sidebar, first cases, live diagnostics,
+log comparisons and troubleshooting. **GUI guide** in the application opens
+that README as well.
 
-| Solver | Choose it when you need | Guide | Example case |
-| --- | --- | --- | --- |
-| `bedloadDemPimpleFoam` | Submerged two-way turbulent CFD–DEM with physical grain contacts and evolving bed porosity; experimental research coupling | [CFD–DEM guide](docs/bedloadDemPimpleFoam.md) | [4 mm bed generator](bedload_dem.py) |
-| `largeTracerFoam` | 1–999 physical spheres with size/density distributions, buoyancy, contact, retention events and trajectories in saved flow | [Large tracer guide](docs/largeTracerFoam.md) | [Free-surface scour demo](tutorials/largeTracerScour/Allrun) |
-| `sedimentInterFoam` | Moving water–air free surface with phase-weighted suspended sediment and finite bed exchange | [VOF sediment guide](docs/sedimentInterFoam.md) | [Castle flume generator](castle_flume.py) |
-| `sedimentPimpleFoam` | A suspended concentration field, settling and conservative exchange with a finite bed inventory | [Eulerian sediment guide](docs/sedimentPimpleFoam.md) | [sedimentChannel](tutorials/sedimentChannel) |
-| `sandParcelPimpleFoam` | Individual weighted sand-parcel trajectories, a uniform/Rouse inlet feed and optional threshold-based resuspension | [Lagrangian sand guide](docs/sandParcelPimpleFoam.md) | [sandParcelChannel](tutorials/sandParcelChannel) |
+## What is included
 
-The sediment solvers use one-way dilute transport on a fixed bed.
-`largeTracerFoam` replays saved carrier fields with one-way particle dynamics;
-large blockage or local particle volume fraction requires a coupled model. Their APIs
-have been tested on **OpenFOAM.com/OpenCFD v1912**. The build script checks this
-version; other OpenFOAM releases and forks need adaptation and validation.
+| Component | What you can do | Guide |
+| --- | --- | --- |
+| River preprocessing GUI | Prepare geometry/terrain and mesh inputs, edit actual patch boundaries, configure turbulence and sediment cases | [GUI README](GUI_README.md), [detailed setup guide](docs/gui-user-guide.md) |
+| Synthetic river designer | Generate channel/obstacle STLs, graded block/snappy meshes, rough-wall checks and discharge/sediment boundary plans | [River design workflow](docs/river-design.md) |
+| Execution and QAQC | Check case files and native mesh quality, run serial/MPI jobs, preserve command logs and numerical settings | [GUI run workflow](GUI_README.md#execution-logs-and-run-settings) |
+| Run diagnostics | Plot linear residuals, Courant numbers, time-step/cost histories and sediment budgets; compare logs and inspect error context | [Diagnostics and interpretation](GUI_README.md#run-diagnostics) |
+| `sedimentPimpleFoam` | Eulerian suspended concentration, settling and conservative exchange with a finite bed inventory | [Concentration solver](docs/sedimentPimpleFoam.md), [example](tutorials/sedimentChannel) |
+| `sandParcelPimpleFoam` | Weighted sand parcels, uniform/Rouse inlet feed and optional threshold-based bed resuspension | [Parcel solver](docs/sandParcelPimpleFoam.md), [example](tutorials/sandParcelChannel) |
+| `bedloadDemPimpleFoam` | Submerged two-way turbulent CFD–DEM with physical grain contacts and evolving bed porosity; experimental | [CFD–DEM guide](docs/bedloadDemPimpleFoam.md), [bed generator](bedload_dem.py) |
+| `largeTracerFoam` | 1–999 physical spheres with size/density distributions, buoyancy, contact, retention events and trajectories in saved flow | [Large tracer guide](docs/largeTracerFoam.md), [workbench](docs/tracer-workbench.md), [scour demo](tutorials/largeTracerScour/Allrun) |
+| `sedimentInterFoam` | Moving water–air free surface with phase-weighted suspended sediment and finite bed exchange | [VOF sediment guide](docs/sedimentInterFoam.md), [Castle flume](docs/castle-flume.md) |
 
-The [Castle flume preset](docs/castle-flume.md) generates a 3 × 0.25 × 1 m
-flume with a centered, arched castle obstacle, sediment settings and local
-mesh refinement from the desktop workbench or `castle_flume.py`.
+The `sedimentPimpleFoam` and `sandParcelPimpleFoam` solvers use **one-way dilute transport, a fixed water-domain mesh
+and fixed bed elevation**. They do not evolve a free surface or river bathymetry.
+Native free-surface solvers such as `interFoam` can be selected for complete
+compatible cases; the sediment starter cases do not supply a coupled VOF or
+morphodynamic model. Residual convergence and conservation checks support
+numerical QAQC; accuracy needs mesh/time-step studies and physical validation.
 
-The **Large tracers** workbench tab configures physical particles in an existing
-flow case or a generated scour-hole example. It exports per-ID histories, VTK
-particles, an interactive browser replay, and central x–z carrier velocity plots.
-An optional diameter cutoff restricts noncohesive sediment pair contact to
-pairs whose particles are both larger than the selected size.
-The [particle preprocessing workflow](docs/tracer-workbench.md) inspects carrier
-fields, imports liquid properties, configures per-patch particle contact/escape,
-and validates initial placement before transport.
+## Launch the GUI
 
-## Quick start in the prepared cloud environment
+Use Python **3.10+** on a desktop with working Qt/VTK graphics. On Linux or WSL:
 
 ```bash
-cd /workspace/OFSolvers
-source scripts/openfoam-env.sh
-./Allwmake
-./tutorials/sedimentChannel/Allrun
-./tutorials/sandParcelChannel/Allrun
+git clone https://github.com/byuill/OFSolvers.git
+cd OFSolvers
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-gui.txt
+# Optional GeoTIFF/DEM processing:
+python -m pip install -r requirements-terrain.txt
+python main.py
 ```
 
-Each `Allrun` creates a fresh case under `/tmp` and prints `Results: ...`.
-For your own Linux/WSL installation, follow the activation and persistent-result
-instructions in [Getting started](docs/getting-started.md).
+Preprocessing and saved-log analysis do not need OpenFOAM. Running mesh utilities
+or solvers requires an activated installation on the GUI's execution machine.
+See the [GUI README](GUI_README.md#installation-and-launch) for Windows and
+Linux/WSL details. This is a **PyQt6 desktop application**, not a web application.
 
-## Repository contents
+## Build and run the sediment solvers
 
-- [Solver sources](applications/solvers): C++ code, OpenFOAM build files and licenses.
-- [User guides](docs/getting-started.md): workflows, settings, units and model behavior.
-- [Tutorials](tutorials): complete runnable case dictionaries and initial fields.
-- [Executable integration checks](tests/openfoam): concentration, parcel and
-  resuspension checks using the actual OpenFOAM solvers.
-- [Allwmake](Allwmake): builds the four standard solvers after OpenFOAM activation;
-  add `--with-dem` for the optional CFD–DEM solver.
+The supported native API is **OpenFOAM.com/OpenCFD v1912**, with development
+headers, `lnInclude` directories, `wmake`, a compiler and matching libraries.
+`Allwmake` checks the version. Other OpenFOAM releases/forks need adaptation
+and validation; installing the GUI dependencies does not install OpenFOAM.
 
-The optional [CFD–DEM solver](docs/bedloadDemPimpleFoam.md) uses a serial LAMMPS
-GRANULAR library on the CFD master, with serial or MPI fluid flow. Build it with
-`LAMMPS_ROOT=/path/to/lammps ./Allwmake --with-dem`. Its default submerged case
-contains 2,925 physical 4 mm grains and exports per-grain histories, bedload flux,
-VTK particles and a central x–z fluid-velocity plot. Component validation does not
-replace calibration of research bedload predictions.
+```bash
+source /path/to/OpenFOAM-v1912/etc/bashrc
+./Allwmake            # add --with-dem (and LAMMPS_ROOT=/path/to/lammps) for bedloadDemPimpleFoam
+./tutorials/sedimentChannel/Allrun /path/to/new/sediment-case
+./tutorials/sandParcelChannel/Allrun /path/to/new/parcel-case
+```
 
-The guides, solver sources and tutorials are versioned together in this repository.
-Compiled executables are built locally; generated case results are separate from
-the source checkout. The OpenFOAM solver code is GPL-3.0-or-later; see each solver's
-`COPYING` file.
+Choose new/empty output folders. Each `Allrun` prints the result location and
+retains native utility/solver logs. With no output argument it uses `/tmp`.
+See [Getting started](docs/getting-started.md) for installation, persistent
+results, ParaView, restarts and parallel execution. The helper
+`scripts/openfoam-env.sh` applies only to an environment already provisioned
+with its matching source/runtime files; it does not install OpenFOAM.
 
-The [October 2026 code review](docs/code-review-2026-10.md) records numerical and
-operational fixes, regression results, performance measurements and remaining
-model limits. GitHub Actions checks the Python workbench; native solver checks
-are available in `tests/openfoam/` for an activated v1912 installation.
+## Development and repository map
+
+```bash
+python -m pip install pytest
+python -m pytest -q
+```
+
+GUI tests use an offscreen Qt platform when no display is attached. Native
+solver integration checks in [tests/openfoam](tests/openfoam) are separate and
+require the activated, built OpenFOAM environment.
+
+- [GUI entry point](main.py), [window/navigation](main_window.py),
+  [GUI README](GUI_README.md).
+- [River geometry and engineering checks](river_design.py), [case exporter](river_case.py),
+  [design interface](river_design_tab.py), [native validation](tests/openfoam/validate_river_design.py).
+- [Log parser and QAQC checks](run_diagnostics.py),
+  [diagnostics interface](diagnostics_tab.py), [execution worker](execution_tab.py).
+- [Solver sources](applications/solvers), [tutorials](tutorials),
+  [solver and setup guides](docs/getting-started.md).
+
+The guides, code and tutorials are versioned together. Executables are built
+locally; case results and logs belong in separate run folders. The OpenFOAM
+solver code is GPL-3.0-or-later; see each solver's `COPYING` file. The
+[October 2026 code review](docs/code-review-2026-10.md) records numerical and
+operational fixes and remaining model limits.

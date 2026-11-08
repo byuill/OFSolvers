@@ -2,6 +2,12 @@ import os
 import signal
 import subprocess
 import threading
+import json
+import math
+from datetime import datetime, timezone
+import uuid
+import shutil
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -11,6 +17,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 
 from case_qaqc import SOLVERS, check_case, mesh_passed
 from foam_io import write_case_files, foam_path
+from run_diagnostics import RunDiagnostics, COURANT
 
 
 class OpenFOAMWorker(QThread):
@@ -18,7 +25,7 @@ class OpenFOAMWorker(QThread):
     output_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(int)
 
-    def __init__(self, command, cwd, parent=None):
+    def __init__(self, command, cwd, parent=None, log_path=None):
         super().__init__(parent)
         if isinstance(command, str):
             raise TypeError('Commands must be argument lists.')
@@ -27,6 +34,7 @@ class OpenFOAMWorker(QThread):
         self.process = None
         self._cancelled = threading.Event()
         self._lock = threading.Lock()
+        self.log_path = Path(log_path) if log_path else None
 
     @property
     def cancelled(self):
@@ -51,9 +59,29 @@ class OpenFOAMWorker(QThread):
 
     def run(self):
         code = -1
-        self.output_signal.emit('--- Executing: ' + ' '.join(self.command) + ' ---')
-        self.output_signal.emit('Case: ' + self.cwd)
+        stream = None
+        def output(line):
+            if stream is not None:
+                stream.write(str(line)+'\n')
+                stream.flush()
+            self.output_signal.emit(str(line))
         try:
+            if self.log_path:
+                stream = self.log_path.open('x', encoding='utf-8')
+                settings = {'created_utc': datetime.now(timezone.utc).isoformat(),
+                            'command': self.command, 'case': self.cwd,
+                            'openfoam_version': os.environ.get('WM_PROJECT_VERSION', 'not activated'),
+                            'files': {}}
+                for relative in ('system/controlDict', 'system/fvSolution', 'system/fvSchemes',
+                                 'system/decomposeParDict', 'constant/sedimentProperties',
+                                 'constant/transportProperties', 'constant/turbulenceProperties',
+                                 'constant/sandCloudProperties','river-design.json','river-boundary-plan.json'):
+                    path = Path(self.cwd)/relative
+                    if path.is_file():
+                        settings['files'][relative] = path.read_text(encoding='utf-8', errors='replace')
+                self.log_path.with_name('settings.json').write_text(json.dumps(settings, indent=2)+'\n', encoding='utf-8')
+            output('--- Executing: ' + ' '.join(self.command) + ' ---')
+            output('Case: ' + self.cwd)
             if not self.cancelled:
                 with self._lock:
                     environment = os.environ.copy()
@@ -65,15 +93,29 @@ class OpenFOAMWorker(QThread):
                 if self.cancelled:
                     self._signal_process()
                 for line in self.process.stdout:
-                    self.output_signal.emit(line.rstrip('\r\n'))
+                    output(line.rstrip('\r\n'))
                 self.process.stdout.close()
                 code = self.process.wait()
         except Exception as exc:
-            self.output_signal.emit(f'ERROR: Failed to execute command: {exc}')
+            try:
+                output(f'ERROR: Failed to execute command: {exc}')
+            except OSError:
+                self.output_signal.emit(f'ERROR: Failed to execute command/log: {exc}')
             self._signal_process(force=True)
             if self.process is not None:
                 self.process.wait()
         finally:
+            try:
+                output(f'--- {"Cancelled" if self.cancelled else "Finished"} (exit code {code}) ---')
+            except OSError as exc:
+                self.output_signal.emit(f'ERROR: Cannot finish persistent log: {exc}')
+                code = -1
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError as exc:
+                    code = -1
+                    self.output_signal.emit(f'ERROR: Cannot close persistent log: {exc}')
             self.finished_signal.emit(code)
 
     def stop(self):
@@ -86,12 +128,19 @@ class OpenFOAMWorker(QThread):
 
 class ExecutionTab(QWidget):
     busy_changed = pyqtSignal(bool)
+    diagnostics_updated = pyqtSignal(object)
+    river_mesh_finished = pyqtSignal(bool)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case_dir = ''
         self.worker = None
         self._operation = None
         self._output = []
+        self.current_report = RunDiagnostics()
+        self.log_path = None
+        self._live_co_peak = None
+        self._river_queue = []
+        self._river_active = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -128,6 +177,8 @@ class ExecutionTab(QWidget):
         self.btn_qaqc.clicked.connect(self.run_qaqc)
         self.btn_mesh = QPushButton('Generate initial mesh (blockMesh)')
         self.btn_mesh.clicked.connect(self.run_block_mesh)
+        self.btn_river_mesh = QPushButton('Build designed river mesh (block / snappy + quality checks)')
+        self.btn_river_mesh.clicked.connect(self.run_river_mesh)
         self.btn_decompose = QPushButton('Write decomposition and run decomposePar')
         self.btn_decompose.setToolTip('Backs up the old dictionary; writes simple decomposition along the selected axis.')
         self.btn_decompose.clicked.connect(self.run_decompose)
@@ -135,10 +186,13 @@ class ExecutionTab(QWidget):
         self.btn_run.clicked.connect(self.run_solver)
         self.btn_reconstruct = QPushButton('Reconstruct latest results')
         self.btn_reconstruct.clicked.connect(self.run_reconstruct)
-        for button in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run, self.btn_reconstruct):
+        for button in (self.btn_mesh, self.btn_river_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run, self.btn_reconstruct):
             layout.addWidget(button)
         self.status_label = QLabel('Not checked')
         layout.addWidget(self.status_label)
+        self.progress_label = QLabel('Run diagnostics: no solver time steps yet.')
+        self.progress_label.setWordWrap(True)
+        layout.addWidget(self.progress_label)
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.document().setMaximumBlockCount(10000)
@@ -168,7 +222,7 @@ class ExecutionTab(QWidget):
         self.console.ensureCursorVisible()
 
     def toggle_ui_state(self, running):
-        for control in (self.btn_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run,
+        for control in (self.btn_mesh, self.btn_river_mesh, self.btn_qaqc, self.btn_decompose, self.btn_run,
                         self.btn_reconstruct, self.combo_solver, self.spin_cores, self.decompose_axis):
             control.setEnabled(not running)
         self.btn_stop.setEnabled(running)
@@ -194,28 +248,56 @@ class ExecutionTab(QWidget):
             return False
         self._operation = operation
         self._output = []
+        try:
+            run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+(operation or 'command')+'-'+uuid.uuid4().hex[:8]
+            folder = Path(self.case_dir)/'logs'/run_id
+            folder.mkdir(parents=True)
+            self.log_path = folder/'console.log'
+        except OSError as exc:
+            self.append_log(f'Cannot create a persistent command log: {exc}')
+            return False
+        self.current_report = RunDiagnostics(source=str(self.log_path))
+        self._live_co_peak = None
+        self.progress_label.setText('Run diagnostics: waiting for solver time steps.')
+        self.append_log(f'Persistent command log: {self.log_path}')
         self.toggle_ui_state(True)
-        self.worker = OpenFOAMWorker(command, self.case_dir, self)
+        self.worker = OpenFOAMWorker(command, self.case_dir, self, log_path=self.log_path)
         self.worker.output_signal.connect(self._receive_output)
         self.worker.finished_signal.connect(self.on_process_finished)
         # Release the worker only after QThread itself has stopped.
         self.worker.finished.connect(self._worker_finished)
         self.worker.start()
+        self.diagnostics_updated.emit(self.current_report)
         return True
 
     def _receive_output(self, line):
         self.append_log(line)
-        if self._operation in ('qaqc', 'before_solver'):
+        self.current_report.feed(line)
+        courant = COURANT.search(line)
+        if courant and not courant.group(1):
+            maximum = float(courant.group(3))
+            if math.isfinite(maximum):
+                self._live_co_peak = max(self._live_co_peak or 0, maximum)
+        if self.current_report.steps:
+            step = self.current_report.steps[-1]
+            self.progress_label.setText(f'Time: {step.time:g} s | Steps logged: {len(self.current_report.steps):,}'
+                + (f' | Peak water Co: {self._live_co_peak:.4g}' if self._live_co_peak is not None else '')
+                + (f' | Latest Δt: {step.delta_t:.4g} s' if step.delta_t is not None else ''))
+        self.diagnostics_updated.emit(self.current_report)
+        if self._operation in ('qaqc', 'before_solver', 'river_check'):
             self._output.append(line)
 
     def on_process_finished(self, code):
         cancelled = self.worker.cancelled
-        self.append_log(f'--- {"Cancelled" if cancelled else "Finished"} (exit code {code}) ---')
         self._success = not cancelled and code == 0
-        if self._operation in ('qaqc', 'before_solver'):
+        if self._operation in ('qaqc', 'before_solver', 'river_check'):
             self._success = not cancelled and mesh_passed('\n'.join(self._output), code)
             self.status_label.setText('Case checks and checkMesh passed.' if self._success
                                       else 'Mesh check failed or was cancelled; solver was not started.')
+            if self._operation=='river_check' or (Path(self.case_dir)/'river-design.json').is_file():
+                regions=re.findall(r'Number of regions:\s*(\d+)', '\n'.join(self._output))
+                if not regions or any(int(count)!=1 for count in regions):self._success=False
+                self.status_label.setText('River mesh native quality checks passed.' if self._success else 'River mesh failed native quality/connectivity checks.')
         elif self._operation == 'solver':
             self.status_label.setText('Solver completed.' if self._success else 'Solver failed or was cancelled.')
 
@@ -226,6 +308,23 @@ class ExecutionTab(QWidget):
         self._operation = None
         self.toggle_ui_state(False)
         worker.deleteLater()
+        if self._river_active:
+            if self._success and worker.command[0]=='snappyHexMesh':
+                try:
+                    from river_case import prepare_mesh_check
+                    prepare_mesh_check(self.case_dir)
+                    self.append_log('Set final rigid-lid patch constraint after snapping.')
+                except (OSError,ValueError,TypeError,KeyError) as exc:
+                    self.append_log('Cannot prepare final river mesh constraints: '+str(exc));self._success=False
+            if not self._success:
+                self._river_queue=[];self._river_active=False
+                self.river_mesh_finished.emit(False)
+            elif self._river_queue:
+                self._next_river_command()
+            else:
+                self._river_active=False
+                self.river_mesh_finished.emit(True)
+            return
         if operation == 'before_solver' and self._success:
             solver = self.combo_solver.currentText()
             ranks = self.spin_cores.value()
@@ -241,7 +340,10 @@ class ExecutionTab(QWidget):
     def run_qaqc(self):
         if self._preflight(parallel=True):
             self.status_label.setText('Case file checks passed; checking the mesh...')
-            self.execute_command(['checkMesh'], 'qaqc')
+            self.execute_command(self.mesh_check_command(), 'qaqc')
+
+    def mesh_check_command(self):
+        return ['checkMesh','-allTopology','-meshQuality'] if (Path(self.case_dir)/'river-design.json').is_file() else ['checkMesh']
 
     def run_block_mesh(self):
         if not self.case_dir or not (Path(self.case_dir)/'system/blockMeshDict').exists():
@@ -252,11 +354,32 @@ class ExecutionTab(QWidget):
             return
         self.execute_command(['blockMesh'], 'mesh')
 
+    def run_river_mesh(self):
+        from river_case import mesh_commands
+        if self.worker is not None:return
+        try:
+            commands=mesh_commands(self.case_dir)
+            missing=[command[0] for command in commands if shutil.which(command[0]) is None]
+            if missing:raise ValueError('Activate OpenFOAM before meshing; missing tools: '+', '.join(missing))
+            self._river_queue=commands
+            self._river_active=True
+            self._next_river_command()
+        except (OSError,ValueError,TypeError,KeyError) as exc:
+            self._river_active=False;self._river_queue=[]
+            self.append_log('River meshing: '+str(exc))
+            self.status_label.setText('River mesh was not started.')
+
+    def _next_river_command(self):
+        command=self._river_queue.pop(0)
+        if not self.execute_command(command,'river_check' if command[0]=='checkMesh' else 'river_mesh'):
+            self._river_queue=[];self._river_active=False
+            self.river_mesh_finished.emit(False)
+
     def run_solver(self):
         # Always recheck files and mesh; a previous PASS can become stale.
         if self._preflight(parallel=True):
             self.status_label.setText('Checking the mesh before starting the solver...')
-            self.execute_command(['checkMesh'], 'before_solver')
+            self.execute_command(self.mesh_check_command(), 'before_solver')
 
     def run_decompose(self):
         if self.worker is not None or not self._preflight():
