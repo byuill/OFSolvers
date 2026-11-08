@@ -1,6 +1,6 @@
 import os
 from typing import Dict
-from foam_io import atomic_write, entries, matching, tokens
+from foam_io import atomic_write, entries, matching, tokens, read_foam_text, encode_foam_text
 
 
 class OpenFoamDictParser:
@@ -26,7 +26,7 @@ class OpenFoamDictParser:
         self.default_internal_field = default_internal_field or "uniform 0"
 
     def write(self, boundary_field: Dict[str, Dict[str, str]]):
-        atomic_write(self.target_path, self.render(boundary_field))
+        atomic_write(self.target_path, encode_foam_text(self.target_path, self.render(boundary_field)))
 
     def render(self, boundary_field, merge=False):
         content = self._read_or_create_template()
@@ -50,8 +50,7 @@ class OpenFoamDictParser:
 
     def _read_or_create_template(self) -> str:
         if os.path.exists(self.target_path):
-            with open(self.target_path, "r", encoding="utf-8") as f:
-                return f.read()
+            return read_foam_text(self.target_path)
 
         return (
             "FoamFile\n"

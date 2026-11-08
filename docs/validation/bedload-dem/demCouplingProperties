@@ -1,0 +1,54 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:                                        |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      demCouplingProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+runName         bedload;
+
+dragModel       DiFelice;
+
+youngModulus    100000000;
+
+poissonRatio    0.25;
+
+restitution     0.80000000000000004;
+
+friction        0.5;
+
+rollingStiffness 1000;
+
+rollingDamping  0.10000000000000001;
+
+rollingFriction 0.050000000000000003;
+
+maxDEMDeltaT    1.9999999999999999e-06;
+
+maxDEMSubcycles 1000000;
+
+responseTimeFraction 0.10000000000000001;
+
+couplingDisplacementFraction 0.10000000000000001;
+
+kernelRadiusRatio 3;
+
+volumeSamples   128;
+
+minimumPorosity 0.10000000000000001;
+
+drivingAcceleration ( 0.10000000000000001 0 0 );
+
+bedloadElevation 0.024;
+
+movingSpeed     0.001;

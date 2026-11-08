@@ -1,0 +1,8 @@
+{
+  "count": 25,
+  "eligible": 14,
+  "threshold_m": 0.03,
+  "strict_above_threshold": true,
+  "unchanged_carrier_and_mesh_files": 278,
+  "completed": true
+}

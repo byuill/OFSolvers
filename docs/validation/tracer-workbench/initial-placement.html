@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Physical tracer replay</title>
+<style>
+body{font:16px system-ui,sans-serif;color:#172b3b;background:#f4f7fa;margin:24px auto;max-width:1200px;padding:0 20px}
+canvas{width:100%;height:560px;background:white;border:1px solid #cbd5df;border-radius:8px}
+.controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:16px 0}
+input[type=range]{flex:1;min-width:200px}button,select{padding:8px;font:inherit}p{line-height:1.5}
+#details{font-variant-numeric:tabular-nums}h1{font-size:25px}
+</style>
+<h1 id="title"></h1><p id="preview-note"></p><p>Individual physical spheres in saved carrier flow. All particles are projected onto the selected plane.
+Radii are drawn to scale. Click a sphere to inspect its ID. A dashed outline marks an escaped particle's last recorded center.</p>
+<div class="controls"><button id="play">Play</button><input id="time" type="range" min="0" value="0" step="1" aria-label="Replay time">
+<span id="clock"></span><label>Plane <select id="plane"><option value="xz">x–z</option><option value="xy">x–y</option><option value="yz">y–z</option></select></label>
+<label>Color <select id="color"><option value="density">Density</option><option value="speed">Speed</option><option value="id">ID</option></select></label></div>
+<canvas id="plot"></canvas><p id="stats"></p><p id="details">Select a particle.</p>
+<p>“Mobilized” means displacement from its initial center exceeds the configured diameter threshold.
+“Left region” is a first-exit event for the selected box; particles may later return. Open particles.pvd in ParaView alongside the carrier case to inspect the full 3D geometry and free surface.</p>
+<script>
+const D={"times":[0.0],"ids":[0,1,2,3,4,5,6,7,8,9,10,11],"frames":[[[2.105148482,0.104509073,0.017551573,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0],[1.200999284,0.159549641,-0.120850445,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[1.939035393,0.304935257,-0.028475732,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[1.377398582,0.068721207,-0.180542996,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[1.32061174,0.090018785,-0.182523957,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[1.370872662,0.35920753,-0.189058265,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[2.10232651,0.371732966,0.017451673,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0],[1.968979789,0.233776037,0.002468753,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0],[1.748976593,0.247230352,-0.149455022,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[2.269239355,0.241003721,0.016671056,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0],[1.774625961,0.28072167,-0.126267025,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0],[1.480287763,0.227843557,-0.185242792,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]]],"diameter":[0.03510311065909078,0.02188136623525674,0.0202476554226403,0.03891396973204958,0.03495205184252228,0.02188344830423624,0.03490331016185947,0.0385220498494873,0.02977724556797563,0.03334207859280599,0.03990897582198678,0.0295143857388091],"density":[1145.854709078205,1136.18554561624,1128.555838346151,1162.982776574584,1072.397769930824,1129.524194052107,1098.563737386791,1161.547296979436,1081.753746737376,1112.396894731864,1139.24103708637,1173.565704088048],"bed":[[0,0],[1,0],[1.3,-0.2],[1.7,-0.2],[2,0],[3,0]],"name":"tracers01-preview","counts":{"particles":12,"mobilized":0,"currently_retained":8,"ever_left_region":0,"crossed_rim":0,"escaped":0},"pairEligible":[true,false,false,true,true,false,true,true,false,true,true,false],"previewOnly":true}, canvas=document.getElementById('plot'), ctx=canvas.getContext('2d'), slider=document.getElementById('time');
+const plane=document.getElementById('plane'), color=document.getElementById('color');
+if(D.pairEligible){const option=document.createElement('option');option.value='pair';option.textContent='Pair contact eligibility';color.appendChild(option)}
+document.getElementById('title').textContent=D.name+' — '+D.ids.length+' physical tracers';
+if(D.previewOnly){document.getElementById('title').textContent='Initial placement preview — '+D.ids.length+' physical tracers';document.getElementById('preview-note').textContent='Initialization only. No particle transport has been simulated.'}
+slider.max=D.times.length-1;
+let playing=false, chosen=-1, screen=[];
+const bounds=[0,1,2].map(k=>{let a=Infinity,b=-Infinity;for(const f of D.frames)for(let i=0;i<f.length;i++){a=Math.min(a,f[i][k]-D.diameter[i]/2);b=Math.max(b,f[i][k]+D.diameter[i]/2)}return[a,b]});
+if(D.bed.length){bounds[0]=[0,3];bounds[2]=[-.25,Math.max(.65,bounds[2][1])]}
+function draw(){
+ const dpr=window.devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
+ canvas.width=w*dpr;canvas.height=h*dpr;ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+ const frame=+slider.value, F=D.frames[frame], axes=plane.value==='xz'?[0,2]:plane.value==='xy'?[0,1]:[1,2];
+ const [a,b]=axes, x0=bounds[a][0],z0=bounds[b][0], dx=Math.max(.01,bounds[a][1]-x0),dz=Math.max(.01,bounds[b][1]-z0);
+ const scale=Math.min((w-110)/(dx*1.08),(h-95)/(dz*1.08)),left=(w-dx*scale)/2,bottom=(h+dz*scale)/2;
+ const X=x=>left+(x-x0)*scale,Z=z=>bottom-(z-z0)*scale;
+ ctx.strokeStyle='#d5dee5';ctx.lineWidth=1;ctx.fillStyle='#526675';ctx.font='12px system-ui';
+ for(let j=0;j<=5;j++){let x=x0+dx*j/5,z=z0+dz*j/5;ctx.beginPath();ctx.moveTo(X(x),Z(z0));ctx.lineTo(X(x),Z(z0+dz));ctx.stroke();ctx.fillText(x.toFixed(2),X(x)-10,Z(z0)+22);ctx.beginPath();ctx.moveTo(X(x0),Z(z));ctx.lineTo(X(x0+dx),Z(z));ctx.stroke();ctx.fillText(z.toFixed(2),X(x0)-45,Z(z)+4)}
+ ctx.fillText(['x','y','z'][a]+' (m)',w/2,h-12);ctx.fillText(['x','y','z'][b]+' (m)',12,25);
+ if(plane.value==='xz'&&D.bed.length){ctx.strokeStyle='#806849';ctx.lineWidth=3;ctx.beginPath();D.bed.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();ctx.strokeStyle='#57a5ca';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(X(0),Z(.5));ctx.lineTo(X(3),Z(.5));ctx.stroke();ctx.setLineDash([])}
+ const values=F.map((p,i)=>color.value==='pair'?Number(D.pairEligible[i]):color.value==='density'?D.density[i]:color.value==='id'?D.ids[i]:Math.hypot(p[3],p[4],p[5]));
+ let vmin=color.value==='pair'?0:Math.min(...values),vmax=color.value==='pair'?1:Math.max(...values);screen=[];
+ for(let i=0;i<F.length;i++){
+  const p=F[i], fraction=(values[i]-vmin)/(vmax-vmin||1), c='hsl('+(245-210*fraction)+',65%,45%)';
+  ctx.strokeStyle=c;ctx.globalAlpha=.3;ctx.lineWidth=1;ctx.beginPath();
+  for(let j=0;j<=frame;j++){const q=D.frames[j][i];if(j)ctx.lineTo(X(q[a]),Z(q[b]));else ctx.moveTo(X(q[a]),Z(q[b]));if(!q[6])break}ctx.stroke();ctx.globalAlpha=1;
+  const x=X(p[a]),y=Z(p[b]),r=D.diameter[i]*scale/2;screen.push({x,y,r:Math.max(6,r)});
+  ctx.beginPath();ctx.arc(x,y,Math.max(1,r),0,2*Math.PI);ctx.fillStyle=c;ctx.strokeStyle=i===chosen?'#000':'#385060';ctx.lineWidth=i===chosen?3:1;
+  if(!p[6])ctx.setLineDash([3,3]);else ctx.fill();ctx.stroke();ctx.setLineDash([]);
+ }
+ document.getElementById('clock').textContent=D.times[frame].toFixed(3)+' s';
+ document.getElementById('stats').textContent='Active: '+F.filter(p=>p[6]).length+' | Inside region: '+F.filter(p=>p[6]&&p[10]).length+' | Mobilized: '+F.filter(p=>p[7]).length+' | Ever left region: '+F.filter(p=>p[8]).length+' | Crossed rim: '+F.filter(p=>p[9]).length+' | '+color.options[color.selectedIndex].text+' range: '+vmin.toPrecision(4)+'–'+vmax.toPrecision(4);
+ if(chosen>=0){let p=F[chosen];document.getElementById('details').textContent='ID '+D.ids[chosen]+' | diameter '+D.diameter[chosen].toPrecision(4)+' m | density '+D.density[chosen].toFixed(1)+' kg/m³ | position ('+p.slice(0,3).map(v=>v.toFixed(4)).join(', ')+') m | speed '+Math.hypot(p[3],p[4],p[5]).toFixed(4)+' m/s'+(D.pairEligible?' | Pair contact: '+(D.pairEligible[chosen]?'eligible':'excluded'):'')}
+}
+slider.oninput=draw;plane.onchange=draw;color.onchange=draw;window.onresize=draw;
+document.getElementById('play').onclick=()=>{playing=!playing;document.getElementById('play').textContent=playing?'Pause':'Play'};
+setInterval(()=>{if(playing){slider.value=(+slider.value+1)%D.times.length;draw()}},90);
+canvas.onclick=e=>{const rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;let best=Infinity;chosen=-1;screen.forEach((p,i)=>{let d=Math.hypot(x-p.x,y-p.y);if(d<p.r+4&&d<best){best=d;chosen=i}});draw()};draw();
+</script></html>

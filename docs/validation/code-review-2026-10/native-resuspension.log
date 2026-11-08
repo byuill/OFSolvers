@@ -1,0 +1,10 @@
+Validation artifacts: <TEMP>
+PASS: absent and disabled process are identical, retaining permanent bed mass
+PASS: subcritical shear and minimum residence time prevent release
+PASS: Shields release, redeposition and repeat release preserve IDs, sizes and mass
+PASS: restart retains bed times, hazards, repeated release events and trajectories
+PASS: equivalent dimensional bed stress and Shields thresholds agree
+PASS: velocity threshold, exponential release statistics, time-step invariant waiting and partial-step motion
+PASS: bed history migrates with parcels across MPI boundaries and restarts on both ranks
+PASS: missing history and unsafe launch displacement are rejected
+All resuspension integration checks passed.

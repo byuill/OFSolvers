@@ -1,0 +1,29 @@
+Validation artifacts: <TEMP>
+PASS two-way drag, physical grain mass, pore volume and bedload flux
+PASS native CFD/DEM restart, including granular contact history
+PASS two-rank porosity/force mapping and coupled restart
+PASS empty-cloud fluid limit
+PASS combined fluid/grain momentum in a closed periodic reference
+PASS periodic travel and native image flags through restart
+PASS Hertz restitution, pair momentum and frictional spin
+PASS restart during active tangential contact preserves force history and spin
+PASS fixed roughness uses native infinite-inertia granular contact
+PASS coupling timestep refinement with fixed DEM accuracy
+PASS porosity-weighted kOmegaSST, kEpsilon, Smagorinsky and WALE
+PASS final CFD and DEM state saved between scheduled writes
+PASS unsafe porosity and missing checkpoint fail without successful outputs
+{
+  "moving_bed_flux_m2_s": 8.094949196886137e-06,
+  "restart_max_state_error": 5.551115123125783e-17,
+  "mpi_restart_max_state_error": 1.3877787807814457e-16,
+  "closed_system_momentum_relative_error": 5.203633558557476e-15,
+  "normal_contact_restitution": 0.8000222557305742,
+  "active_contact_restart_errors": {
+    "position_m": 3.664110351936367e-10,
+    "velocity_m_s": 2.0285646831763593e-07,
+    "spin_rad_s": 0.00025053146035958207
+  },
+  "frozen_anchor_restitution": 0.8000341293993958,
+  "coupling_step_refinement_ratio": 0.6346162204104393
+}
+All native CFD--DEM checks passed.

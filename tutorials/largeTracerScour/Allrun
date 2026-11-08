@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+destination="${1:-$(mktemp -d -t large-tracer-scour-XXXXXX)}"
+python3 "$root/scour_tracer_demo.py" "$destination" --coarse
+"$destination/Allrun"
+python3 "$root/visualize_tracers.py" "$destination/postProcessing/largeTracers/tracers01" --carrier
+printf 'Results: %s\n' "$destination"

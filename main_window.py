@@ -40,6 +40,8 @@ from execution_tab import ExecutionTab
 from sediment_tab import SedimentTab
 from diagnostics_tab import DiagnosticsTab
 from wizard_banner import WizardBanner
+from flume_tab import FlumeTab
+from tracer_tab import TracerTab
 
 
 class MainWindow(QMainWindow):
@@ -68,6 +70,13 @@ class MainWindow(QMainWindow):
         case_layout.addWidget(self.case_dir_edit, 1)
         case_layout.addWidget(self.case_browse_button)
         layout.addLayout(case_layout)
+        self.workflow=QComboBox()
+        self.workflow.addItem('Flow and sediment setup','flow')
+        self.workflow.addItem('largeTracerFoam — Large particle transport','particles')
+        workflow_row=QHBoxLayout(); workflow_row.addWidget(QLabel('Workbench workflow:')); workflow_row.addWidget(self.workflow,1)
+        layout.addLayout(workflow_row)
+        self.workflow_hint=QLabel(); self.workflow_hint.setWordWrap(True); layout.addWidget(self.workflow_hint)
+        self.particle_workflow=False
 
         self.case_hint = QLabel('Start by selecting a case folder. River Sediment can create a runnable channel starter in an empty folder.')
         self.case_hint.setTextFormat(Qt.TextFormat.PlainText)
@@ -137,6 +146,17 @@ class MainWindow(QMainWindow):
         self.tab_sediment.solver_changed.connect(self._sync_execution_solver)
         self.tab_sediment.case_prepared.connect(self._on_starter_prepared)
 
+        self.tab_flume = FlumeTab()
+        self.tabs.addTab(self.tab_flume, "Castle flume")
+        self.tab_flume.case_prepared.connect(self._on_starter_prepared)
+        self.tab_flume.mesh_requested.connect(self._mesh_castle_flume)
+
+        self.tab_tracers = TracerTab()
+        self.tabs.addTab(self.tab_tracers, "Large tracers")
+        self.tab_tracers.case_prepared.connect(self._on_starter_prepared)
+        self.tab_tracers.command_requested.connect(self._run_tracer_command)
+        self.tab_tracers.carrier_boundaries_requested.connect(lambda:self.tabs.setCurrentWidget(self.tab_boundaries))
+
         # Tab 8: Execution & Monitoring
         self.tab_execution = ExecutionTab()
         self.tabs.addTab(self.tab_execution, '8. Execution & Monitoring')
@@ -147,6 +167,8 @@ class MainWindow(QMainWindow):
         self.solver_combo.currentTextChanged.connect(self.tab_execution.set_solver)
         self.tab_execution.combo_solver.currentTextChanged.connect(self._sync_execution_solver)
         self.tab_execution.busy_changed.connect(self.set_busy)
+        self.workflow.currentIndexChanged.connect(self.set_workflow)
+        self.set_workflow()
 
         self.tab_diagnostics = DiagnosticsTab()
         self.tabs.addTab(self.tab_diagnostics, '9. Run diagnostics')
@@ -298,7 +320,8 @@ class MainWindow(QMainWindow):
         solver_layout = QFormLayout()
         self.solver_combo = QComboBox()
         self.solver_combo.addItems(SOLVERS)
-        solver_layout.addRow("Solver:", self.solver_combo)
+        self.solver_field_label=QLabel('Solver:')
+        solver_layout.addRow(self.solver_field_label, self.solver_combo)
         solver_group.setLayout(solver_layout)
         layout.addWidget(solver_group)
 
@@ -575,9 +598,10 @@ class MainWindow(QMainWindow):
         self.case_dir = str(folder)
         self.case_dir_edit.setText(self.case_dir)
         for tab in (self.tab_geometry, self.tab_mesh, self.tab_boundaries, self.tab_turbulence,
-                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_diagnostics):
+                    self.tab_execution, self.tab_terrain, self.tab_sediment, self.tab_flume, self.tab_tracers, self.tab_diagnostics):
             tab.set_case_directory(self.case_dir)
         self.case_directory_changed.emit(self.case_dir)
+        self.workflow.setCurrentIndex(1 if (folder/'tracers.json').is_file() else 0)
         if (folder/'river-design.json').is_file():
             try:
                 from river_case import load_river_case
@@ -598,6 +622,44 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError) as exc:
                 QMessageBox.warning(self, 'Case controls', f'Could not load all time controls: {exc}')
 
+        if self.tab_flume.mesh_button.isEnabled():
+            self.sim_combo.setCurrentText('RAS')
+            for spin, number in ((self.dim_x_spinbox,3), (self.dim_y_spinbox,.25),
+                                 (self.dim_z_spinbox,1), (self.cells_x_spinbox,120),
+                                 (self.cells_y_spinbox,10), (self.cells_z_spinbox,40)):
+                spin.setValue(number)
+            for name, combo in self.boundary_combos.items():
+                combo.setCurrentText('Inlet' if name == 'Min X' else 'Outlet' if name == 'Max X'
+                                     else 'Atmosphere/Open' if name == 'Max Z' and self.tab_flume.depth.currentText() == '0.5' else 'Wall')
+            for axis, extent, cells in [('X',3,120),('Y',.25,10),('Z',1,40)]:
+                self.tab_mesh.blockmesh_inputs[axis]['min'].setValue(0)
+                self.tab_mesh.blockmesh_inputs[axis]['max'].setValue(extent)
+                self.tab_mesh.blockmesh_inputs[axis]['cells'].setValue(cells)
+
+    def _mesh_castle_flume(self):
+        if not (Path(self.case_dir)/"flume.json").is_file():
+            QMessageBox.warning(self, "Castle flume", "Generate or select a castle flume case first.")
+            return
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.execute_command(["sh", "./Allmesh"], "castle_mesh")
+
+    def _run_tracer_command(self, command, operation):
+        self.tabs.setCurrentWidget(self.tab_execution)
+        self.tab_execution.execute_command(command, operation)
+
+    def set_workflow(self):
+        self.particle_workflow=self.workflow.currentData()=='particles'
+        self.run_button.setText('Save large-particle setup' if self.particle_workflow else 'Save plan, time controls and mesh inputs')
+        self.solver_field_label.setText('Carrier flow solver:' if self.particle_workflow else 'Solver:')
+        self.tabs.setTabText(self.tabs.indexOf(self.tab_boundaries),
+            '5. Carrier flow boundaries' if self.particle_workflow else '5. Boundary Conditions')
+        self.workflow_hint.setText('largeTracerFoam uses saved carrier fields. Prepare flow in the carrier tabs; '
+            'configure initialization and particle boundaries, preview placement, and launch tracking in Large tracers.'
+            if self.particle_workflow else '')
+        self.workflow_hint.setVisible(self.particle_workflow)
+        if self.particle_workflow:
+            self.tabs.setCurrentWidget(self.tab_tracers)
+
     def _on_starter_prepared(self, path, solver):
         self.set_case_directory(path)
         self._sync_execution_solver(solver)
@@ -605,6 +667,7 @@ class MainWindow(QMainWindow):
     def set_busy(self, running):
         self.case_browse_button.setEnabled(not running)
         self.run_button.setEnabled(not running)
+        self.workflow.setEnabled(not running)
         self.open_action.setEnabled(not running)
         self.save_action.setEnabled(not running)
         self.check_action.setEnabled(not running)

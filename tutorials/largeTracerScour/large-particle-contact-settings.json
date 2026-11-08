@@ -1,0 +1,69 @@
+{
+  "count": 25,
+  "seed": 42,
+  "diameter": {
+    "kind": "uniform",
+    "low": 0.02,
+    "high": 0.04,
+    "median": 0.03,
+    "sigma": 0.25,
+    "values": [],
+    "weights": []
+  },
+  "density": {
+    "kind": "uniform",
+    "low": 1050,
+    "high": 1200,
+    "median": 1100,
+    "sigma": 0.25,
+    "values": [],
+    "weights": []
+  },
+  "seed_min": [
+    1.3,
+    0.1,
+    -0.21
+  ],
+  "seed_max": [
+    1.7,
+    0.4,
+    -0.02
+  ],
+  "placement": "bed",
+  "bed_patches": [
+    "bed"
+  ],
+  "min_water_fraction": 0.99,
+  "retention_min": [
+    1,
+    0,
+    -0.2
+  ],
+  "retention_max": [
+    2,
+    0.5,
+    0
+  ],
+  "rim_elevation": 0,
+  "start_time": 0,
+  "end_time": 3,
+  "output_interval": 0.05,
+  "max_delta_t": 0.002,
+  "frozen_flow": false,
+  "flow_time": 0,
+  "alpha_field": "alpha.water",
+  "run_name": "large-only-contact",
+  "initial_velocity": "zero",
+  "rho_water": 1000,
+  "mu_water": 0.001,
+  "rho_air": 1.2,
+  "mu_air": 1.8e-05,
+  "added_mass": 0.5,
+  "restitution": 0.1,
+  "friction": 0.4,
+  "collisions": true,
+  "mobilization_diameters": 1,
+  "volume_samples": 128,
+  "collision_mode": "largeOnly",
+  "collision_diameter_threshold": 0.03
+}

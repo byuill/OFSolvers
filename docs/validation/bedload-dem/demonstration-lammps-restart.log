@@ -1,0 +1,81 @@
+LAMMPS (22 Jul 2025 - Update 4)
+units si
+atom_style sphere
+atom_modify map array
+boundary p p f
+newton off
+read_restart "<DEMO_CASE>/0.03/uniform/DEM/lammps.restart"
+Reading restart file ...
+  restart file = 22 Jul 2025, LAMMPS = 22 Jul 2025
+  restoring atom style sphere from restart
+  orthogonal box = (0 0 0) to (0.16 0.064 0.064)
+  1 by 1 by 1 MPI processor grid
+  restoring pair style granular from restart
+  2925 atoms
+  read_restart CPU = 0.033 seconds
+comm_modify vel yes
+pair_style granular
+group fixed type 2
+585 atoms in group fixed
+group mobile subtract all fixed
+2340 atoms in group mobile
+fix anchor fixed freeze
+fix integrate mobile nve/sphere
+fix hydro all external pf/callback 1 1
+neighbor 0.00080000000000000004 bin
+neigh_modify delay 0 every 1 check yes
+fix wall2 all wall/gran granular hertz/material 100000000 0.80000000000000004 0.25 tangential mindlin_rescale NULL 1.0 0.5 damping coeff_restitution rolling sds 1000 0.10000000000000001 0.050000000000000003 zplane 0 0.064000000000000015
+Resetting peratom fix info from restart file:
+  fix style: wall/gran, fix ID: wall2
+thermo 0
+timestep 1.9999999999999999e-06
+run 0 post no
+Resetting global fix info from restart file:
+  fix style: NEIGH_HISTORY, fix ID: NEIGH_HISTORY_GRANULAR
+Resetting peratom fix info from restart file:
+  fix style: NEIGH_HISTORY, fix ID: NEIGH_HISTORY_GRANULAR
+Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
+All restart file global fix info was re-assigned
+All restart file peratom fix info was re-assigned
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 0.0048
+  ghost atom cutoff = 0.0048
+  binsize = 0.0024, bins = 67 27 27
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair granular, perpetual
+      attributes: half, newton off, size, history
+      pair build: half/size/bin/atomonly/newtoff
+      stencil: full/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 17.76 | 17.76 | 17.76 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press
+     15230   1.9234406e+16  0              0              0.0011647457   4.4165265
+Loop time of 1.236e-06 on 1 procs for 0 steps with 2925 atoms
+
+write_restart "<DEMO_CASE>/0.03/uniform/DEM/lammps.restart"
+System init for write_restart ...
+Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
+timestep 1.9607843137254902e-06
+run 51 pre yes post no
+Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 17.76 | 17.76 | 17.76 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press
+     15230   1.9234406e+16  0              0              0.0011647457   4.4165265
+     15281   1.9971755e+16  0              0              0.0012093961   5.6058034
+Loop time of 0.0193502 on 1 procs for 51 steps with 2925 atoms
+
+timestep 1.960784313725491e-06
+run 51 pre yes post no
+Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 17.76 | 17.76 | 17.76 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press
+     15281   1.9971755e+16  0              0              0.0012093961   5.5978151
+     15332   2.0598421e+16  0              0              0.0012473441   5.5805175
+Loop time of 0.0341214 on 1 procs for 51 steps with 2925 atoms
+
+write_restart "<DEMO_CASE>/0.0302/uniform/DEM/lammps.restart"
+System init for write_restart ...
+Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
+Total wall time: 0:00:03

@@ -1,5 +1,17 @@
 # River preprocessing and run QAQC GUI
 
+Select **largeTracerFoam — Large particle transport** for the dedicated
+[particle preprocessing and boundary workflow](tracer-workbench.md). It provides
+carrier inspection, placement suggestions, per-patch particle rules, and an
+initialization-only validation preview. Particle saves preserve the carrier
+application, flow time controls, and initial flow boundary fields.
+
+The **Large tracers** tab seeds 1–999 physical spheres into a saved flow model,
+configures size/density distributions and contact, runs `largeTracerFoam`, and
+opens particle trajectories and an interactive replay. It includes a water/air
+scour-hole example with a moving free surface. Follow the
+[large tracer guide](largeTracerFoam.md) for its workflow and physics limits.
+
 [Getting started](getting-started.md) · [Concentration solver](sedimentPimpleFoam.md) ·
 [Particle solver](sandParcelPimpleFoam.md)
 
@@ -14,12 +26,13 @@ graded blockMesh or snappyHexMesh, near-wall checks and river flow/sediment plan
 The tutorial workflow below remains available for existing starter cases.
 
 The desktop GUI prepares OpenFOAM case dictionaries, initial conditions and
-boundary conditions. The **River Sediment** tab supports both custom solvers.
+boundary conditions. The **River Sediment** tab configures concentration and sand-parcel transport.
 Execution uses the OpenFOAM installation on the machine running the GUI.
-Both sediment solvers use a fixed water domain and fixed bed elevation with
-one-way dilute transport. They do not track a moving water surface or update
-river bathymetry. Use a complete water-domain mesh and physically appropriate
-water-flow boundary conditions.
+`sedimentPimpleFoam` and `sandParcelPimpleFoam` use a fixed water domain and
+fixed bed elevation with one-way dilute transport. The **Castle flume** preset
+uses `sedimentInterFoam` for a moving water/air surface at 0.5 m water depth.
+None of these solvers updates river bathymetry. Use a complete mesh and
+physically appropriate flow boundary conditions.
 
 ## Launch
 
@@ -59,6 +72,13 @@ installation. See [Getting started](getting-started.md#windows-and-wsl).
 The preprocessing widgets can run without OpenFOAM, provided Python/Qt/VTK
 and a display work. Mesh checks and simulations require the native executables.
 Activate **OpenCFD v1912** before launching the GUI to use the sediment solvers.
+
+Case preflight and the fluid boundary editor accept gzip-compressed ASCII
+mesh/field files. Fluid edits preserve compression and back up the original
+bytes. VOF **Atmosphere** conditions prescribe physical total pressure using
+`prghTotalPressure`, including its hydrostatic conversion to `p_rgh`.
+Generated castle/scour meshing scripts refuse an existing mesh; use a fresh case
+for a new mesh, or preserve results before deliberately removing the old mesh.
 
 ## First sediment case
 
@@ -266,3 +286,9 @@ conservation, serial restart, two-rank parcel resuspension/restart/reconstructio
 generated block/snappy mesh dictionaries, and a native parcel run after rebuilding
 the flow and sediment conditions for a custom mesh. It prints the artifact directory.
 Xvfb is only needed for headless GUI testing; a normal desktop uses its display.
+
+## Castle flume preset
+
+Use the **Castle flume** tab to generate the arched castle flume into the selected
+empty case folder, then **Mesh castle flume and check mesh** before solving.
+See [geometry, sediment settings and free-surface/filled-flume models](castle-flume.md).

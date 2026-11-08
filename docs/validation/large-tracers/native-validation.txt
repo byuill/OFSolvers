@@ -1,0 +1,26 @@
+Validation artifacts: /tmp/large-tracer-validation-qjl0pcbw
+PASS neutral advection and unchanged carrier fields
+PASS analytical Stokes response including added mass
+PASS buoyant terminal rise
+PASS transient field interpolation and fluid acceleration
+PASS timestep refinement in accelerating flow
+PASS partial submergence and floating equilibrium
+PASS finite-radius bed contact
+PASS rolling contact and rotational state
+PASS nonoverlapping bed seeding on a sloping surface
+PASS sphere collision momentum and energy
+PASS retained-region exit and open-boundary escape
+PASS impossible initial geometry fails atomically
+PASS overlapping initialization and transient extrapolation rejected
+PASS deterministic populations and output protection
+PASS 999 independent physical particles
+{
+  "neutral_advection_position_error_m": 1.7208456881689926e-15,
+  "stokes_velocity_relative_error": 2.0419160506084652e-05,
+  "terminal_rise_relative_error": 0.0025833949680185986,
+  "accelerating_flow_velocity_error_m_s": 3.3346887495788735e-07,
+  "time_step_refinement_error_ratio": 0.24852278178858273,
+  "floating_water_fraction_mean": 0.49944042726336085,
+  "floating_equilibrium_water_fraction": 0.499399279134962
+}
+All native tracer checks passed. Artifacts: /tmp/large-tracer-validation-qjl0pcbw

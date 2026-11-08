@@ -57,7 +57,7 @@ class CaseController:
         solver = self.view.solver_combo.currentText()
         advice = []
 
-        if solver in ["interFoam", "multiphaseEulerFoam"]:
+        if solver in ["interFoam", "sedimentInterFoam", "multiphaseEulerFoam"]:
             advice.append(
                 "💡 Open Channel / Multiphase: Set the top boundary (Max Z) to 'Atmosphere/Open'. Bottom (Min Z) is typically a 'Wall'."
             )
@@ -86,6 +86,9 @@ class CaseController:
         self.view.advice_label.setText("\n".join(advice))
 
     def run_simulation(self):
+        if getattr(self.view,'particle_workflow',False):
+            self.view.tab_tracers.save()
+            return
         # 1. Pull data from the view to update the model
         solver = self.view.solver_combo.currentText()
         dim_x, dim_y, dim_z = (

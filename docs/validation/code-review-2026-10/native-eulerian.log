@@ -1,0 +1,16 @@
+Validation artifacts: <TEMP>
+PASS: open inflow, settling, deposition and discrete mass budget
+PASS: closed-domain deposition conserves suspended+bed mass
+PASS: erosion releases sediment and cannot overdraw variable face inventory
+PASS: restarted C and Mbed match uninterrupted integration
+PASS: kEpsilon turbulence selection and eddy sediment diffusivity
+PASS: Smagorinsky turbulence selection and eddy sediment diffusivity
+PASS: SpalartAllmarasDES turbulence selection and eddy sediment diffusivity
+PASS: sediment exits the downstream boundary
+PASS: particle-flux inletOutlet handles reverse flow
+PASS: two independently inventoried active wall patches
+PASS: two-rank parallel bed conservation and field reconstruction
+PASS: nonorthogonal mesh conservative corrected diffusion
+PASS: invalid Schmidt number rejected
+PASS: missing inventory is rejected instead of replenished
+All integration checks passed.

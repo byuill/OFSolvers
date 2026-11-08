@@ -1,0 +1,13 @@
+Validation artifacts: <TEMP>
+PASS native gzip mesh and initial fields accepted by workbench and checkMesh
+PASS fluid boundary editing preserves compressed files and initialized internal fields
+PASS native atmospheric pressure includes the hydrostatic head correction
+PASS remeshing guard preserves a compressed mesh after a solver run
+{
+  "compressed_mesh_files": 5,
+  "saved_time": 0.01,
+  "atmosphere_p_rgh_min_pa": 36.75916705,
+  "atmosphere_p_rgh_max_pa": 36.772,
+  "expected_static_p_rgh_pa": 36.772,
+  "mesh_unchanged": true
+}

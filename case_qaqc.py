@@ -7,11 +7,12 @@ import re
 import shutil
 import json
 
-from foam_io import boundary_patches, entries, scalar, value
+from foam_io import boundary_patches, entries, scalar, value, foam_path, read_foam_text
 
 SOLVERS = ('interFoam', 'multiphaseEulerFoam', 'buoyantBoussinesqPimpleFoam',
-           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam')
-PRESSURE_SOLVERS = {'pimpleFoam', 'simpleFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam'}
+           'pimpleFoam', 'simpleFoam', 'sedFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'sedimentInterFoam', 'bedloadDemPimpleFoam')
+VOF_SOLVERS = {'interFoam','sedimentInterFoam'}
+PRESSURE_SOLVERS = {'pimpleFoam', 'simpleFoam', 'sedimentPimpleFoam', 'sandParcelPimpleFoam', 'bedloadDemPimpleFoam'}
 
 
 @dataclass
@@ -59,6 +60,9 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*',solver):
         result.errors.append('Select a solver executable name, without paths or arguments.')
         return result
+    if type(cores) is not int or cores<1:
+        result.errors.append('MPI rank count must be a positive integer.')
+        return result
     case = Path(case_dir).expanduser().resolve() if case_dir else None
     if case is None or not case.is_dir():
         result.errors.append('Select an existing OpenFOAM case folder.')
@@ -91,20 +95,27 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                 result.errors.append('endTime exceeds the river hydrograph coverage. Extend its Q/C table before running.')
         if application != solver:
             result.errors.append(f'Case application is {application}; selected solver is {solver}.')
-        result.time_directory = start_directory(case, control)
-        if scalar(control, 'endTime') <= float(result.time_directory):
+        if cores==1:
+            result.time_directory = start_directory(case, control)
+        end_time=scalar(control, 'endTime')
+        if cores==1 and end_time <= float(result.time_directory):
             result.errors.append('endTime must be later than the selected initial/restart time.')
         if scalar(control, 'deltaT') <= 0 or scalar(control, 'writeInterval') <= 0:
             result.errors.append('deltaT and writeInterval must be positive.')
     except (ValueError, OSError) as exc:
         result.errors.append(f'controlDict: {exc}')
+        return result
     patches = []
     for name in ('points', 'faces', 'owner', 'neighbour', 'boundary'):
-        if not (case/'constant/polyMesh'/name).is_file():
+        if not foam_path(case/'constant/polyMesh'/name).is_file():
             result.errors.append(f'Missing mesh file constant/polyMesh/{name}; run mesh generation first.')
     if not any('Missing mesh file' in e for e in result.errors):
         try:
             patches = boundary_patches(case/'constant/polyMesh/boundary')
+            if (case/'flume.json').is_file() and not any(
+                p['name'] == 'castle' and p['type'] == 'wall' for p in patches
+            ):
+                result.errors.append('Castle flume mesh is missing its castle wall; run Allmesh, not only blockMesh.')
         except (OSError, ValueError) as exc:
             result.errors.append(f'Mesh boundary metadata: {exc}')
     fields = ['U']
@@ -112,16 +123,20 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
     if solver in PRESSURE_SOLVERS:
         fields.append('p')
         properties += ['transportProperties', 'turbulenceProperties']
-    elif solver == 'interFoam':
+    elif solver in VOF_SOLVERS:
         fields += ['p_rgh', 'alpha.water']
         properties += ['transportProperties', 'turbulenceProperties', 'g']
     else:
         result.warnings.append(f'Model-specific fields for {solver} are not fully checked by this GUI.')
-    if solver == 'sedimentPimpleFoam':
+    if solver in ('sedimentPimpleFoam','sedimentInterFoam'):
         fields += ['C', 'Mbed']
         properties += ['sedimentProperties', 'g']
     if solver == 'sandParcelPimpleFoam':
         properties += ['sandCloudProperties', 'g']
+    if solver == 'bedloadDemPimpleFoam':
+        properties += ['demCouplingProperties','g']
+        fields += ['porosity']
+        result.warnings.append('CFD–DEM currently supports submerged, axis-aligned periodic/walled boxes and native LAMMPS checkpoints. See the coupled solver guide.')
     for name in properties:
         if not (case/'constant'/name).is_file():
             result.errors.append(f'Missing constant/{name}.')
@@ -144,21 +159,31 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
             result.errors.append(f'turbulenceProperties: {exc}')
     if result.time_directory:
         for name in fields:
-            path = case/result.time_directory/name
+            path = foam_path(case/result.time_directory/name)
             if not path.is_file():
                 result.errors.append(f'Missing {result.time_directory}/{name}.')
                 continue
             if not patches:
                 continue
             try:
-                field_text = path.read_text()
+                field_text = read_foam_text(path)
+                if solver == 'sedimentInterFoam' and name == 'alpha.water' and (case/'flume.json').is_file():
+                    uniform = re.search(r'\binternalField\s+uniform\s+([^;]+);',field_text)
+                    if uniform and float(uniform[1]) == 0:
+                        result.errors.append('Initialize the half-depth water phase with setFields (or Allmesh) before solving.')
+                # setFields writes large cell lists. Preflight inspects dimensions
+                # and patches, not every internal value; avoid tokenizing millions
+                # of values on the GUI thread. The solver checks the full field.
+                field_text = re.sub(
+                    r'\binternalField\s+nonuniform\s+List<[^>]+>\s+\d+\s*\(.*?\)\s*;',
+                    'internalField uniform 0;', field_text, flags=re.S)
                 dimensions = {'U':[0,1,-1,0,0,0,0], 'p':[0,2,-2,0,0,0,0],
                     'p_rgh':[1,-1,-2,0,0,0,0], 'alpha.water':[0]*7,
-                    'C':[1,-3,0,0,0,0,0], 'Mbed':[1,-2,0,0,0,0,0]}
+                    'C':[1,-3,0,0,0,0,0], 'Mbed':[1,-2,0,0,0,0,0], 'porosity':[0]*7}
                 if name in dimensions:
                     actual_dimensions = [float(v) for v in value(field_text,'dimensions').strip('[]').split()]
                     if actual_dimensions != dimensions[name]:
-                        result.errors.append(f'{path.name} has incorrect physical dimensions.')
+                        result.errors.append(f'{name} has incorrect physical dimensions.')
                 boundaries = value(field_text, 'boundaryField')[1:-1]
                 boundary_entries = entries(boundaries)
                 for patch in patches:
@@ -212,7 +237,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
         rank_times = []
         for rank in range(cores):
             folder = case/f'processor{rank}'
-            if not (folder/'constant/polyMesh/boundary').exists():
+            if not foam_path(folder/'constant/polyMesh/boundary').exists():
                 result.errors.append(f'Missing processor{rank} mesh; decompose with the selected rank count.')
             try:
                 rank_time = start_directory(folder, control)
@@ -220,7 +245,7 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
                 if scalar(control,'endTime') <= float(rank_time):
                     result.errors.append(f'endTime must be later than processor{rank} restart time {rank_time}.')
                 for name in fields:
-                    if not (folder/rank_time/name).is_file():
+                    if not foam_path(folder/rank_time/name).is_file():
                         result.errors.append(f'Missing processor{rank}/{rank_time}/{name}.')
                 if solver == 'sandParcelPimpleFoam' and float(rank_time) > 0:
                     metadata = folder/rank_time/'uniform/lagrangian/sandCloud'
@@ -240,8 +265,16 @@ def check_case(case_dir, solver, cores=1, check_programs=True):
             result.errors.append('Processor restart times disagree; retain a consistent complete saved time.')
         if rank_times and len(set(rank_times)) == 1:
             result.time_directory = rank_times[0]
+    if solver=='bedloadDemPimpleFoam' and result.time_directory:
+        if float(result.time_directory)==0:
+            if not (case/'constant/DEM/particles.data').is_file():
+                result.errors.append('Missing constant/DEM/particles.data: generate physical DEM grains first.')
+        else:
+            for name in ('lammps.restart','couplingState'):
+                if not (case/result.time_directory/'uniform/DEM'/name).is_file():
+                    result.errors.append(f'Missing DEM restart checkpoint {result.time_directory}/uniform/DEM/{name}.')
     if check_programs:
-        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam'):
+        if solver in ('sedimentPimpleFoam','sandParcelPimpleFoam','sedimentInterFoam','bedloadDemPimpleFoam'):
             version = os.environ.get('WM_PROJECT_VERSION','')
             if version and version not in ('1912','v1912'):
                 result.errors.append(f'The custom sediment solvers require OpenCFD v1912; active version is {version}.')

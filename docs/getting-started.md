@@ -11,7 +11,12 @@ Use **sandParcelPimpleFoam** for sand trajectories represented by weighted
 computational parcels, a specified inlet mass feed and optional resuspension of
 previously deposited parcels. A parcel can represent many physical grains.
 
-Both solve incompressible transient flow with PIMPLE and transport dilute sediment
+Use **largeTracerFoam** to seed and track 1–999 individual physical spheres with
+selectable size/density distributions, buoyancy and finite-radius contact. It
+replays saved flow fields and includes a free-surface scour-hole demonstration.
+See the [large tracer guide](largeTracerFoam.md) and **Large tracers** GUI tab.
+
+The concentration and sand-parcel solvers use incompressible transient PIMPLE flow and transport dilute sediment
 without feedback on the flow. They keep the mesh and bed elevation fixed. Their
 individual guides explain assumptions, equations and input units.
 
@@ -49,9 +54,11 @@ The version should be `v1912` or `1912`. Build and check the executable location
 ./Allwmake
 command -v sedimentPimpleFoam
 command -v sandParcelPimpleFoam
+command -v sedimentInterFoam
+command -v largeTracerFoam
 ```
 
-`Allwmake` builds both executables into the activated OpenFOAM user application
+`Allwmake` builds the four executables into the activated OpenFOAM user application
 directory (`FOAM_USER_APPBIN`). Run the solvers from a terminal or configure
 and run them using the desktop GUI's **River Sediment** and **Execution** tabs.
 See the [GUI guide](gui-user-guide.md) for Python dependencies and the workflow.

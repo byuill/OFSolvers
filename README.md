@@ -7,6 +7,10 @@ turbulence, suspended sediment and sand parcels. Use **ParaView** to visualize
 saved flow and particle fields; the GUI's post-processing focuses on numerical
 stability, conservation, computational performance and error investigation.
 
+It also includes an individual large-particle replay solver, a free-surface
+VOF sediment solver, and an optional LAMMPS-coupled turbulent CFD–DEM bedload
+solver, with a castle flume preset and large-tracer workbench.
+
 **New to the desktop application? Start with the [GUI README](GUI_README.md).**
 It covers installation, the workflow sidebar, first cases, live diagnostics,
 log comparisons and troubleshooting. **GUI guide** in the application opens
@@ -22,8 +26,11 @@ that README as well.
 | Run diagnostics | Plot linear residuals, Courant numbers, time-step/cost histories and sediment budgets; compare logs and inspect error context | [Diagnostics and interpretation](GUI_README.md#run-diagnostics) |
 | `sedimentPimpleFoam` | Eulerian suspended concentration, settling and conservative exchange with a finite bed inventory | [Concentration solver](docs/sedimentPimpleFoam.md), [example](tutorials/sedimentChannel) |
 | `sandParcelPimpleFoam` | Weighted sand parcels, uniform/Rouse inlet feed and optional threshold-based bed resuspension | [Parcel solver](docs/sandParcelPimpleFoam.md), [example](tutorials/sandParcelChannel) |
+| `bedloadDemPimpleFoam` | Submerged two-way turbulent CFD–DEM with physical grain contacts and evolving bed porosity; experimental | [CFD–DEM guide](docs/bedloadDemPimpleFoam.md), [bed generator](bedload_dem.py) |
+| `largeTracerFoam` | 1–999 physical spheres with size/density distributions, buoyancy, contact, retention events and trajectories in saved flow | [Large tracer guide](docs/largeTracerFoam.md), [workbench](docs/tracer-workbench.md), [scour demo](tutorials/largeTracerScour/Allrun) |
+| `sedimentInterFoam` | Moving water–air free surface with phase-weighted suspended sediment and finite bed exchange | [VOF sediment guide](docs/sedimentInterFoam.md), [Castle flume](docs/castle-flume.md) |
 
-Both custom solvers use **one-way dilute transport, a fixed water-domain mesh
+The `sedimentPimpleFoam` and `sandParcelPimpleFoam` solvers use **one-way dilute transport, a fixed water-domain mesh
 and fixed bed elevation**. They do not evolve a free surface or river bathymetry.
 Native free-surface solvers such as `interFoam` can be selected for complete
 compatible cases; the sediment starter cases do not supply a coupled VOF or
@@ -59,7 +66,7 @@ and validation; installing the GUI dependencies does not install OpenFOAM.
 
 ```bash
 source /path/to/OpenFOAM-v1912/etc/bashrc
-./Allwmake
+./Allwmake            # add --with-dem (and LAMMPS_ROOT=/path/to/lammps) for bedloadDemPimpleFoam
 ./tutorials/sedimentChannel/Allrun /path/to/new/sediment-case
 ./tutorials/sandParcelChannel/Allrun /path/to/new/parcel-case
 ```
@@ -93,4 +100,6 @@ require the activated, built OpenFOAM environment.
 
 The guides, code and tutorials are versioned together. Executables are built
 locally; case results and logs belong in separate run folders. The OpenFOAM
-solver code is GPL-3.0-or-later; see each solver's `COPYING` file.
+solver code is GPL-3.0-or-later; see each solver's `COPYING` file. The
+[October 2026 code review](docs/code-review-2026-10.md) records numerical and
+operational fixes and remaining model limits.
